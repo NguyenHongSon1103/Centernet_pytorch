@@ -1,44 +1,12 @@
-import json
 import os
 import cv2
-import tensorflow as tf
+from torch.utils.data import Dataset
 import math
 import numpy as np
-import sys
-sys.path.append('/data2/sonnh/E2EObjectDetection/Centernet')
-from generators.utils import gaussian_radius, draw_gaussian, draw_gaussian_2, draw_msra_gaussian
-# from augmentor.color import VisualEffect
-# from augmentor.misc import MiscEffect
-# from augmentor.advanced import mosaic_augmenter, jpeg_compress
+# import sys
+# sys.path.append('/data2/sonnh/E2EObjectDetection/Centernet')
 from augmenter import VisualAugmenter, MiscAugmenter, AdvancedAugmenter
-
-def resize_keep_ar(size, image, boxes):
-    h, w, c = image.shape
-    scale_w = size / w
-    scale_h = size / h
-    scale = min(scale_w, scale_h)
-    h = int(h * scale)
-    w = int(w * scale)
-    padimg = np.zeros((size, size, c), image.dtype)
-    padimg[:h, :w] = cv2.resize(image, (w, h))
-    new_anns = []
-    for box in boxes:
-        box = np.array(box).astype(np.float32)
-        box *= scale
-        new_anns.append(box)
-    return padimg, new_anns
-
-def resize_wo_keep_ar(size, image, boxes):
-    h, w, c = image.shape
-    resized = cv2.resize(image, (size, size))
-    scale_h, scale_w = size/h, size/w
-    new_anns = []
-    for box in boxes:
-        xmin, ymin, xmax, ymax = box
-        xmin, xmax = xmin * scale_w, xmax * scale_w
-        ymin, ymax = ymin * scale_h, ymax * scale_h
-        new_anns.append([xmin, ymin, xmax, ymax])
-    return resized, new_anns
+from assigner import Assigner
 
 def letterbox(size, im, boxes, color=(114, 114, 114), stride=32):
     ## auto = True, scaleup = False
@@ -70,13 +38,7 @@ def letterbox(size, im, boxes, color=(114, 114, 114), stride=32):
     boxes[..., [1, 3]] += dh
     return im, boxes.astype('int32')
 
-resize_methods = {
-    'keep':resize_keep_ar,
-    'no_keep':resize_wo_keep_ar,
-    'letter':letterbox
-}
-
-class Generator(tf.keras.utils.Sequence):
+class Generator(Dataset):
     def __init__(self, data, hparams, mode='train'):
         """
         Initialize Generator object.

@@ -1,6 +1,35 @@
 import numpy as np
 import xml.etree.ElementTree as ET
 import json
+import cv2
+
+def resize_keep_ar(size, image, boxes):
+    h, w, c = image.shape
+    scale_w = size / w
+    scale_h = size / h
+    scale = min(scale_w, scale_h)
+    h = int(h * scale)
+    w = int(w * scale)
+    padimg = np.zeros((size, size, c), image.dtype)
+    padimg[:h, :w] = cv2.resize(image, (w, h))
+    new_anns = []
+    for box in boxes:
+        box = np.array(box).astype(np.float32)
+        box *= scale
+        new_anns.append(box)
+    return padimg, new_anns
+
+def resize_wo_keep_ar(size, image, boxes):
+    h, w, c = image.shape
+    resized = cv2.resize(image, (size, size))
+    scale_h, scale_w = size/h, size/w
+    new_anns = []
+    for box in boxes:
+        xmin, ymin, xmax, ymax = box
+        xmin, xmax = xmin * scale_w, xmax * scale_w
+        ymin, ymax = ymin * scale_h, ymax * scale_h
+        new_anns.append([xmin, ymin, xmax, ymax])
+    return resized, new_anns
 
 def parse_coco_json(path):
     with open(path, 'r') as f:
@@ -139,29 +168,6 @@ def gaussian_radius(det_size, min_overlap=0.7):
     sq3 = np.sqrt(b3 ** 2 - 4 * a3 * c3)
     r3 = (b3 + sq3) / 2
     return max(0, min(r1, r2, r3))
-
-# def gaussian_radius(det_size, min_overlap):
-#     height, width = det_size
-#     a1 = 1
-#     b1 = (height + width)
-#     c1 = width * height * (1 - min_overlap) / (1 + min_overlap)
-#     sq1 = np.sqrt(b1 ** 2 - 4 * a1 * c1)
-#     r1 = (b1 - sq1) / (2 * a1)
-    
-#     a2 = 4
-#     b2 = 2 * (height + width)
-#     c2 = (1 - min_overlap) * width * height
-#     sq2 = np.sqrt(b2 ** 2 - 4 * a2 * c2)
-#     r2 = (b2 - sq2) / (2 * a2)
-
-#     a3 = 4 * min_overlap
-#     b3 = -2 * min_overlap * (height + width)
-#     c3 = (min_overlap - 1) * width * height
-#     sq3 = np.sqrt(b3 ** 2 - 4 * a3 * c3)
-#     r3 = (b3 + sq3) / (2 * a3)
-
-#     return min(r1, r2, r3)
-
 
 if __name__ == '__main__':
     gaussian2D((3, 3))

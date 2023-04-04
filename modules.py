@@ -174,41 +174,41 @@ class Head(nn.Module):
         return out_hm, out_wh, out_reg
 
 class IHead(nn.Module):
-    def __init__(self, c1, c, nc=20) -> None:
+    def __init__(self, ch, nc=20) -> None:
         super().__init__()
-        self.ia, self.im = ImplicitA(c), ImplicitM(c)
-        self.conv1 = Conv(c1, c*4, k=3, s=1)
-        self.conv2 = Conv(c*4, c*2, k=3, s=1)
-        self.conv1 = Conv(c*2, c, k=3, s=1)
+        self.ia, self.im = ImplicitA(ch[0]), ImplicitM(ch[0])
+        self.conv1 = Conv(ch[0]*3, ch[2], k=3, s=1)
+        self.conv2 = Conv(ch[2], ch[1], k=3, s=1)
+        self.conv3 = Conv(ch[1], ch[0], k=3, s=1)
 
         self.hm_out = nn.Sequential(
-            Conv(c, c, 3, 1),
+            Conv(ch[0], ch[0], 3, 1),
             self.ia,
-            Conv(c, c, 3, 1),
+            Conv(ch[0], ch[0], 3, 1),
             self.im,
-            nn.Conv2d(c, nc, 1),
+            nn.Conv2d(ch[0], nc, 1),
             nn.Sigmoid()
         )
 
         self.wh_out = nn.Sequential(
-            Conv(c, c, 3, 1),
+            Conv(ch[0], ch[0], 3, 1),
             self.ia,
-            Conv(c, c, 3, 1),
+            Conv(ch[0], ch[0], 3, 1),
             self.im,
-            nn.Conv2d(c, 2, 1),
+            nn.Conv2d(ch[0], 2, 1),
         )
 
         self.reg_out = nn.Sequential(
-            Conv(c, c, 3, 1),
+            Conv(ch[0], ch[0], 3, 1),
             self.ia,
-            Conv(c, c, 3, 1),
+            Conv(ch[0], ch[0], 3, 1),
             self.im,
-            nn.Conv2d(c, 2, 1),
+            nn.Conv2d(ch[0], 2, 1),
             nn.Sigmoid()
         )
 
     def forward(self, x):
-        x = self.conv1(self.conv2(self.conv3(x)))
+        x = self.conv3(self.conv2(self.conv1(x)))
         
         out_hm = self.hm_out(x)
         out_wh = self.wh_out(x)

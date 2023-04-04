@@ -1,0 +1,37 @@
+
+nc : 1,
+names : ['polyps'],
+
+#----------------------- 
+# Model architecture One of ['tiny', 's', 'm', 'l', 'x']
+#-----------------------
+version: 'n'
+
+#-----------------------
+# data configs
+#-----------------------
+input_size : 640,
+max_objects : 100,
+model_dir : 'trained_models/20230307',
+batch_size:16, 
+epochs : 100,
+resume : False,
+pretrained_weights : '',
+optimizer : dict(
+    type : 'adam',
+    base_lr : 1e-3,
+    end_lr : 1e-5,
+    warmup_lr : 2e-5,
+    warmup_steps : 10000
+),
+fine_tune_checkpoint : False,
+misc_effect:None,
+visual_effect:None,
+label_map : 'config/classes_polyp.json',
+
+train: [/home/s/sonnh/polyp_data/train/images, /home/s/sonnh/nonpolyp_pseudo_data/images]
+val: /home/s/sonnh/polyp_data/val/images
+test: /home/s/sonnh/polyp_data/test/images
+# Classes
+names:
+  0: polyps

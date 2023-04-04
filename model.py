@@ -2,7 +2,7 @@ import contextlib
 import math
 import torch
 import torch.nn as nn
-from modules import Conv, Bottleneck, SPPF, C2f, Concat, Detect, ImplicitA, ImplicitM
+from modules import Conv, Bottleneck, SPPF, C2f, Concat, Detect, ImplicitA, ImplicitM, IHead
 
 def make_divisible(x, divisor):
     # Returns nearest x divisible by divisor
@@ -62,8 +62,32 @@ def parse_model(d, ch, version='n'):  # model_dict, input_channels(3)
         ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
 
-class Backbone(nn.Module):
-    def __init__(self, version='n'):
+class Neck(nn.Module):
+    def __init__(self, ch, repeat) -> None:
+        super().__init__()
+        self.concat = Concat(1)
+        self.c2f_1 = nn.Sequential(*(C2f(ch[4], ch[0]) for _ in range(repeat[0]))) #for layer9
+        self.c2f_2 = nn.Sequential(*(C2f(ch[3], ch[0]) for _ in range(repeat[0]))) #for layer12
+        self.c2f_3 = nn.Sequential(*(C2f(ch[2], ch[0]) for _ in range(repeat[0]))) #for layer15
+        self.ia = ImplicitA(ch[0]*3)
+        self.ims = [ImplicitM(ch[0]) for i in range(3)]
+
+    def forward(self, out_9, out_12, out_15):
+        up1 = nn.Upsample(None, 8, 'bilinear')(out_9)
+        up1 = self.c2f_1(up1)
+        
+        up2 = nn.Upsample(None, 4, 'bilinear')(out_12)
+        up2 = self.c2f_2(up2)
+
+        up3 = nn.Upsample(None, 2, 'bilinear')(out_15)
+        up3 = self.c2f_3(up3)
+
+        x = self.ia(self.concat([self.ims[0](up1), self.ims[1](up2), self.ims[2](up3)]))
+
+        return x
+
+class Model(nn.Module):
+    def __init__(self, version='n', nc=80):
         super().__init__()
         scales = dict(
         # [depth, width, max_channels]
@@ -87,7 +111,7 @@ class Backbone(nn.Module):
         self.layer_6 = nn.Sequential(*(C2f(ch[3], ch[3], shortcut=True) for _ in range(repeat[1])))
         self.layer_7 = Conv(ch[3], ch[4], k=3, s=2)
         self.layer_8 = nn.Sequential(*(C2f(ch[4], ch[4], shortcut=True) for _ in range(repeat[0])))
-        self.layer_9 = SPPF(ch[4], ch[4])
+        self.layer_9 = SPPF(ch[4], ch[4]) 
 
         #neck
         self.layer_10_13 = nn.Upsample(None, 2, 'nearest')
@@ -99,6 +123,8 @@ class Backbone(nn.Module):
         # self.layer_18 = nn.Sequential(*(C2f(ch[2]+ch[3], ch[2]) for _ in range(repeat[0])))
         # self.layer_19 = Conv(ch[3], ch[3], k=3, s=2)
         # self.layer_21 = nn.Sequential(*(C2f(ch[3]+ch[4], ch[4]) for _ in range(repeat[0])))
+        self.neck = Neck(ch, repeat)
+        self.head = IHead(ch, nc)
         
     def forward(self, inp):
         assert inp.shape[1] == 3
@@ -117,32 +143,10 @@ class Backbone(nn.Module):
         x = self.layer_10_13(out_12)
         x = self.layer_11_14_17_20((x, out_bb[0]))
         out_15 = self.layer_15(x)
-        return out_12, out_15
+        out = self.neck(out_bb[-1], out_12, out_15)
+        out = self.head(out)
+        return out
 
-class Neck(nn.Module):
-    def __init__(self, ch, repeat) -> None:
-        super().__init__()
-        self.concat = Concat(1)
-        self.c2f_1 = nn.Sequential(*(C2f(ch[4], ch[0]) for _ in range(repeat[0]))) #for layer9
-        self.c2f_2 = nn.Sequential(*(C2f(ch[3], ch[0]) for _ in range(repeat[0]))) #for layer12
-        self.c2f_3 = nn.Sequential(*(C2f(ch[2], ch[0]) for _ in range(repeat[0]))) #for layer15
-        self.ia = ImplicitA(ch[0])
-        self.ims = [ImplicitM(ch[0]) for i in range(3)]
-
-    def forward(self, x):
-        up1 = nn.Upsample(None, 8, 'bilinear')(x)
-        up1 = self.c2f_1(up1)
-        
-        up2 = nn.Upsample(None, 4, 'bilinear')(x)
-        up2 = self.c2f_2(up2)
-
-        up3 = nn.Upsample(None, 2, 'bilinear')(x)
-        up1 = self.c2f_3(up3)
-
-        x = self.ia(self.concat([self.ims[0](up1), self.ims[1](up2), self.ims[2](up3)]))
-        return x
-
-         
 if __name__ == '__main__':
     ## load yaml
     import numpy as np
@@ -156,8 +160,8 @@ if __name__ == '__main__':
     #     print(backbone[i])
     # state_dict = torch.load('yolov8n.pt')
     # print(state_dict)
-    backbone = Backbone('n')
+    backbone = Model('n', nc=2)
     data = np.random.random((2, 3, 640, 640)).astype('float32')
     data = torch.from_numpy(data)
     res = backbone(data)
-    print(res[0].shape, res[1].shape)
+    print(res[0].shape, res[1].shape, res[2].shape)
