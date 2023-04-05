@@ -3,10 +3,11 @@ import cv2
 from torch.utils.data import Dataset
 import math
 import numpy as np
-# import sys
-# sys.path.append('/data2/sonnh/E2EObjectDetection/Centernet')
-from augmenter import VisualAugmenter, MiscAugmenter, AdvancedAugmenter
-from assigner import Assigner
+from .augmenter import VisualAugmenter, MiscAugmenter, AdvancedAugmenter
+from .assigner import Assigner
+from copy import deepcopy
+from .utils import parse_xml, check_is_image
+from tqdm import tqdm
 
 def letterbox(size, im, boxes, color=(114, 114, 114), stride=32):
     ## auto = True, scaleup = False
@@ -38,153 +39,100 @@ def letterbox(size, im, boxes, color=(114, 114, 114), stride=32):
     boxes[..., [1, 3]] += dh
     return im, boxes.astype('int32')
 
+def load_data(img_dirs):
+    '''
+    Default: each set contains 2 folder: images and annotations
+    '''
+    if isinstance(img_dirs, str):
+        img_dirs = [img_dirs]
+
+    image_paths = []
+    label_paths = []
+    for img_dir in img_dirs:
+        lb_dir = img_dir.replace('images', 'annotations')
+        for name in os.listdir(img_dir):
+            if not check_is_image(name):
+                continue
+            image_paths.append(os.path.join(img_dir,  name))
+            label_paths.append(os.path.join(lb_dir,  '.'.join(name.split('.')[:-1])+'.xml'))
+    
+    print('Scanning: ', end='')
+    background = 0
+    data = []
+    pbar = tqdm(enumerate(image_paths), total=len(image_paths))
+    for i, fp in pbar:
+        xp = label_paths[i]
+        if os.path.exists(xp):
+            boxes, class_names = parse_xml(xp)
+            data += {'im_path':fp, 'boxes':boxes, 'class_names':class_names}
+        else:
+            background += 1
+        
+        pbar.set_description(desc='Images: %d | Background: %d'%(len(data), background))
+    
+    return data
+
 class Generator(Dataset):
-    def __init__(self, data, hparams, mode='train'):
+    def __init__(self, hparams, mode='train'):
         """
-        Initialize Generator object.
+        Centernet dataset
 
         Args:
             data: dictionary with 2 keys: 'im_path' and 'lb_path'
             hparams: a config dictionary
         """
-        self.data = data
-        self.resizer = resize_methods['keep']
+        self.img_dirs = hparams[mode]
+        self.resizer = letterbox
         self.batch_size = hparams['batch_size']
         self.input_size = hparams['input_size']
         self.stride = 4
         self.output_size = self.input_size // self.stride
         self.max_objects = hparams['max_objects']
-        self.num_classes = hparams['num_classes']
+        self.num_classes = hparams['nc']
         self.mode = mode
+        self.mapper = hparams['names']
 
-        ''' Old method
-        self.visual_augmenter = VisualEffect(color_prob=0.25, contrast_prob=0.25,
-            brightness_prob=0.25, sharpness_prob=0.25, autocontrast_prob=0.25,
-            equalize_prob=0.25, solarize_prob=0.25)
-        self.misc_augmenter = MiscEffect(multi_scale_prob=0.15, rotate_prob=0.15, flip_prob=0.15, crop_prob=0.15, translate_prob=0.15)
-        '''
+        self.data = load_data(self.img_dirs)
+        self.assigner = Assigner(self.num_classes, self.input_size, self.stride, self.max_objects)
+
         ## New aumgenter
         self.visual_augmenter = VisualAugmenter(keep_prob=0.5)
         self.misc_augmenter = MiscAugmenter(keep_prob=0.5)
         self.advanced_augmenter = AdvancedAugmenter(keep_prob=0.5)
-
+        
     def on_epoch_end(self):
         np.random.shuffle(self.data)
 
     def __len__(self):
-        """
-        Number of batches for generator.
-        """
-        nums = len(self.data) // self.batch_size
-        if len(self.data) % self.batch_size == 0:
-            return nums
-        return nums + 1
-
-    def get_group(self, batch):
-        """
-        Abstract function, need to implement
-        """
-        pass
-
-    def sample_batch(self, idx):
-        """
-        Abstract function, need to implement
-        """
-        pass
-
+        return len(self.data)
+    
     def __getitem__(self, idx):
-        batch = self.sample_batch(idx)
-        group_images, group_boxes, group_ids = self.get_group(batch)
+        d = deepcopy(self.data[idx])
+        image = cv2.imread(d['im_path'])
+        boxes, class_names = d['boxes'], d['class_names']
+        class_ids = [self.mapper[name] for name in class_names]
+
+        item = {'image':image, 'boxes':boxes, 'class_ids':class_ids}
 
         ##Augmentation
         if self.mode == 'train':
-            group_images_aug, group_boxes_aug, group_ids_aug = [], [], []
-            for image, boxes, class_id in zip(group_images, group_boxes, group_ids):
-                if len(group_images) > 4:
-                    idxs = np.random.choice(np.arange(len(group_images)), 4)
-                    list_data = [{'image':group_images[i], 'boxes':group_boxes[i], 'class_ids':group_ids[i]} for i in idxs]
-                    item = self.advanced_augmenter(list_data)
-                else:
-                    item = {'image':image, 'boxes':boxes, 'class_ids':class_id}
+            item = self.visual_augmenter(item)
+            item = self.misc_augmenter(item)
 
-                item = self.visual_augmenter(item)
-                item = self.misc_augmenter(item)
+        item['image'], item['boxes'] = self.resizer(self.input_size, item['image'], item['boxes']) #512x512
+        item['image'] = self.preprocess_image(item['image'])
 
-                group_images_aug.append(item['image'])
-                group_boxes_aug.append(item['boxes'])
-                group_ids_aug.append(item['class_ids'])
-            group_images = group_images_aug
-            group_boxes = group_boxes_aug
-            group_ids = group_ids_aug
+        hm, wh, reg, indices = self.assigner(item['boxes'], item['class_id'])
 
-        images, batch_hm, batch_wh, batch_reg = [], [], [], []
-        for image, boxes, class_id in zip(group_images, group_boxes, group_ids):
-            image, boxes = self.resizer(self.input_size, image, boxes) #512x512
-            image = self.preprocess_image(image)
-#             print(boxes)
-            h, w = image.shape[:2]
-            hm, wh, reg = self.compute_targets_each_image(boxes, class_id)
-#             print(boxes, np.sum(hm), np.sum(wh), np.sum(reg), np.where(hm == 1.0))
-            images.append(image)
-            batch_hm.append(hm)
-            batch_wh.append(wh)
-            batch_reg.append(reg)
-
-        outputs = np.concatenate([np.array(batch_wh, dtype=np.float32),
-                                  np.array(batch_reg, dtype=np.float32),
-                                  np.array(batch_hm, dtype=np.float32)
-                                 ], -1)
-        return np.array(images, dtype=np.float32), outputs
-
-    def get_heatmap_per_box(self, heatmap, cls_id, ct_int, size):
-        h, w = size
-        radius = gaussian_radius((math.ceil(h), math.ceil(w)), min_overlap=0.7)
-        radius = max(0, int(radius))
-        heatmap[..., cls_id] = draw_gaussian_2(heatmap[...,cls_id], ct_int, radius)
-        return heatmap
-
-    def compute_targets_each_image(self, boxes, class_id):
-        hm = np.zeros((self.output_size, self.output_size, self.num_classes), dtype=np.float32)
-        whm = np.zeros((self.output_size, self.output_size, 2), dtype=np.float32)
-        reg = np.zeros((self.output_size, self.output_size, 2), dtype=np.float32)
-        for i, (box, cls_id) in enumerate(zip(boxes, class_id)):
-            #scale box to output size
-            xmin, ymin, xmax, ymax = [p/self.stride for p in box]
-            h_box, w_box = ymax - ymin, xmax - xmin
-            if h_box < 0 or w_box < 0:
-                continue
-            x_center, y_center = (xmax + xmin) / 2.0, (ymax + ymin) / 2.0
-            x_center_floor, y_center_floor = int(np.floor(x_center)), int(np.floor(y_center))
-            hm = self.get_heatmap_per_box(hm, cls_id, (x_center_floor, y_center_floor), (h_box, w_box))
-            whm[x_center_floor, y_center_floor] = [w_box, h_box]
-            reg[x_center_floor, y_center_floor] = x_center - x_center_floor, y_center - y_center_floor
-#             print(ct - ct_int)
-#         print(np.where(hm == 1))
-#         print('------')
-        return hm, whm, reg
+        return hm, wh, reg, indices
 
     def preprocess_image(self, image):
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = image.astype(np.float32)
-
-#         image[..., 0] -= 103.939
-#         image[..., 1] -= 116.779
-#         image[..., 2] -= 123.68
         return image / 255.0
 
     def reverse_preprocess(self, image):
-#         image[..., 0] += 103.939
-#         image[..., 1] += 116.779
-#         image[..., 2] += 123.68
         image *= 255.0
         image = image.astype(np.uint8)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         return image
-
-    def get_name2idx_mapper(self, path):
-        '''
-        from label name to index
-        '''
-        with open(path, 'r') as f:
-            classes_dict = json.load(f)
-        return classes_dict

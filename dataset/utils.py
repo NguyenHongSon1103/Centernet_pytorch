@@ -3,6 +3,9 @@ import xml.etree.ElementTree as ET
 import json
 import cv2
 
+def check_is_image(name:str):
+    return name.endswith(('.jpg', '.png', '.jpeg'))
+
 def resize_keep_ar(size, image, boxes):
     h, w, c = image.shape
     scale_w = size / w

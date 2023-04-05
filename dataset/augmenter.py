@@ -18,7 +18,7 @@ class VisualAugmenter:
                 A.GaussianBlur(p=0.4),
                 A.MedianBlur(p=0.3)
             ], p=0.1),
-            A.JpegCompression(quality_lower=75, quality_upper=100, p=0.1),
+            A.ImageCompression(quality_lower=75, quality_upper=100, p=0.1),
             A.ToGray(p=0.1)
         ]
         self.transform = A.Compose(T, p=1.0)

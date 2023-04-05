@@ -12,33 +12,6 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
     return p
 
-def make_anchors(feats, strides, grid_cell_offset=0.5):
-    """Generate anchors from features."""
-    anchor_points, stride_tensor = [], []
-    assert feats is not None
-    dtype, device = feats[0].dtype, feats[0].device
-    for i, stride in enumerate(strides):
-        _, _, h, w = feats[i].shape
-        sx = torch.arange(end=w, device=device, dtype=dtype) + grid_cell_offset  # shift x
-        sy = torch.arange(end=h, device=device, dtype=dtype) + grid_cell_offset  # shift y
-        sy, sx = torch.meshgrid(sy, sx, indexing='ij') if TORCH_1_10 else torch.meshgrid(sy, sx)
-        anchor_points.append(torch.stack((sx, sy), -1).view(-1, 2))
-        stride_tensor.append(torch.full((h * w, 1), stride, dtype=dtype, device=device))
-    return torch.cat(anchor_points), torch.cat(stride_tensor)
-
-
-def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
-    """Transform distance(ltrb) to box(xywh or xyxy)."""
-    lt, rb = distance.chunk(2, dim)
-    x1y1 = anchor_points - lt
-    x2y2 = anchor_points + rb
-    if xywh:
-        c_xy = (x1y1 + x2y2) / 2
-        wh = x2y2 - x1y1
-        return torch.cat((c_xy, wh), dim)  # xywh bbox
-    return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
-
-
 class Conv(nn.Module):
     # Standard convolution with args(ch_in, ch_out, kernel, stride, padding, groups, dilation, activation)
     default_act = nn.SiLU()  # default activation
@@ -215,69 +188,94 @@ class IHead(nn.Module):
         out_reg = self.reg_out(x)
 
         return out_hm, out_wh, out_reg
-    
-class DFL(nn.Module):
-    # Integral module of Distribution Focal Loss (DFL)
-    # Proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
-    def __init__(self, c1=16):
-        super().__init__()
-        self.conv = nn.Conv2d(c1, 1, 1, bias=False).requires_grad_(False)
-        x = torch.arange(c1, dtype=torch.float)
-        self.conv.weight.data[:] = nn.Parameter(x.view(1, c1, 1, 1))
-        self.c1 = c1
 
-    def forward(self, x):
-        b, c, a = x.shape  # batch, channels, anchors
-        return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(b, 4, a)
+def _sigmoid(x):
+    y = torch.clamp(x.sigmoid_(), min=1e-4, max=1-1e-4)
+    return y
 
-    
-class Detect(nn.Module):
-    # YOLOv8 Detect head for detection models
-    dynamic = False  # force grid reconstruction
-    export = False  # export mode
-    shape = None
-    anchors = torch.empty(0)  # init
-    strides = torch.empty(0)  # init
+def _gather_feat(feat, ind, mask=None):
+    dim  = feat.size(2)
+    ind  = ind.unsqueeze(2).expand(ind.size(0), ind.size(1), dim)
+    feat = feat.gather(1, ind)
+    if mask is not None:
+        mask = mask.unsqueeze(2).expand_as(feat)
+        feat = feat[mask]
+        feat = feat.view(-1, dim)
+    return feat
 
-    def __init__(self, nc=80, ch=()):  # detection layer
-        super().__init__()
-        self.nc = nc  # number of classes
-        self.nl = len(ch)  # number of detection layers
-        self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
-        self.no = nc + self.reg_max * 4  # number of outputs per anchor
-        self.stride = torch.zeros(self.nl)  # strides computed during build
+def _transpose_and_gather_feat(feat, ind):
+    feat = feat.permute(0, 2, 3, 1).contiguous()
+    feat = feat.view(feat.size(0), -1, feat.size(3)) # N, WxH, C
+    feat = _gather_feat(feat, ind)
+    return feat
 
-        c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], self.nc)  # channels
-        self.cv2 = nn.ModuleList(
-            nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch)
-        self.cv3 = nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, self.nc, 1)) for x in ch)
-        self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
+def _nms(heat, kernel=3):
+    pad = (kernel - 1) // 2
 
-    def forward(self, x):
-        shape = x[0].shape  # BCHW
-        for i in range(self.nl):
-            x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
-        if self.training:
-            return x
-        elif self.dynamic or self.shape != shape:
-            self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
-            self.shape = shape
+    hmax = nn.functional.max_pool2d(
+        heat, (kernel, kernel), stride=1, padding=pad)
+    keep = (hmax == heat).float()
+    return heat * keep
 
-        x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
-        if self.export and self.format in ('saved_model', 'pb', 'tflite', 'edgetpu', 'tfjs'):  # avoid TF FlexSplitV ops
-            box = x_cat[:, :self.reg_max * 4]
-            cls = x_cat[:, self.reg_max * 4:]
-        else:
-            box, cls = x_cat.split((self.reg_max * 4, self.nc), 1)
-        dbox = dist2bbox(self.dfl(box), self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
-        y = torch.cat((dbox, cls.sigmoid()), 1)
-        return y if self.export else (y, x)
+def _topk(scores, K=40):
+    batch, cat, height, width = scores.size()
+      
+    topk_scores, topk_inds = torch.topk(scores.view(batch, cat, -1), K)
 
-    def bias_init(self):
-        # Initialize Detect() biases, WARNING: requires stride availability
-        m = self  # self.model[-1]  # Detect() module
-        # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1
-        # ncf = math.log(0.6 / (m.nc - 0.999999)) if cf is None else torch.log(cf / cf.sum())  # nominal class frequency
-        for a, b, s in zip(m.cv2, m.cv3, m.stride):  # from
-            a[-1].bias.data[:] = 1.0  # box
-            b[-1].bias.data[:m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
+    topk_inds = topk_inds % (height * width)
+    topk_ys   = (topk_inds / width).int().float()
+    topk_xs   = (topk_inds % width).int().float()
+      
+    topk_score, topk_ind = torch.topk(topk_scores.view(batch, -1), K)
+    topk_clses = (topk_ind / K).int()
+    topk_inds = _gather_feat(
+        topk_inds.view(batch, -1, 1), topk_ind).view(batch, K)
+    topk_ys = _gather_feat(topk_ys.view(batch, -1, 1), topk_ind).view(batch, K)
+    topk_xs = _gather_feat(topk_xs.view(batch, -1, 1), topk_ind).view(batch, K)
+
+    return topk_score, topk_inds, topk_clses, topk_ys, topk_xs
+
+def ctdet_decode(heat, wh, reg=None, cat_spec_wh=False, K=100):
+    '''
+    cat_spec_wh: Get K boxes for each class if True
+    '''
+    batch, cat, height, width = heat.size()
+
+    # heat = torch.sigmoid(heat)
+    # perform nms on heatmaps
+    heat = _nms(heat)
+      
+    scores, inds, clses, ys, xs = _topk(heat, K=K)
+    if reg is not None:
+      reg = _transpose_and_gather_feat(reg, inds)
+      reg = reg.view(batch, K, 2)
+      xs = xs.view(batch, K, 1) + reg[:, :, 0:1]
+      ys = ys.view(batch, K, 1) + reg[:, :, 1:2]
+    else:
+      xs = xs.view(batch, K, 1) + 0.5
+      ys = ys.view(batch, K, 1) + 0.5
+    wh = _transpose_and_gather_feat(wh, inds)
+    if cat_spec_wh:
+      wh = wh.view(batch, K, cat, 2)
+      clses_ind = clses.view(batch, K, 1, 1).expand(batch, K, 1, 2).long()
+      wh = wh.gather(2, clses_ind).view(batch, K, 2)
+    else:
+      wh = wh.view(batch, K, 2)
+    clses  = clses.view(batch, K, 1).float()
+    scores = scores.view(batch, K, 1)
+    bboxes = torch.cat([xs - wh[..., 0:1] / 2, 
+                        ys - wh[..., 1:2] / 2,
+                        xs + wh[..., 0:1] / 2, 
+                        ys + wh[..., 1:2] / 2], dim=2)
+    detections = torch.cat([bboxes, scores, clses], dim=2)
+      
+    return detections
+
+class Decoder(nn.Module):
+    def __init__(self, max_boxes):
+        super(Decoder, self).__init__()
+        self.ctdet_decode = ctdet_decode
+        self.max_boxes = max_boxes
+
+    def forward(self, out):
+        return self.ctdet_decode(out[0], out[1], out[2], K=self.max_boxes)

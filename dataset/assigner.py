@@ -1,12 +1,6 @@
-import json
-import os
-import cv2
-import torch
 import math
 import numpy as np
-# import sys
-# sys.path.append('/data2/sonnh/E2EObjectDetection/Centernet')
-from utils import gaussian_radius, draw_gaussian, draw_gaussian_2, draw_msra_gaussian
+from .utils import gaussian_radius, draw_gaussian, draw_gaussian_2, draw_msra_gaussian
 
 class Assigner:
     def __init__(self, num_classes, input_size=(640, 640), stride=4, max_object=100):
