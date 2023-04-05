@@ -126,3 +126,31 @@ class L1Loss(nn.Module):
         loss = F.l1_loss(pred * mask, target * mask, reduction='elementwise_mean')
         return loss
 
+class Loss(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.hm_loss = FocalLoss()
+        self.wh_loss = RegLoss()
+        self.reg_loss = RegLoss()
+    
+    def forwar(self, output, target, weights=[1.0, 0.1, 1.0]):
+        '''
+        output: 
+                hm: NxCxWxH | wh: Nx2xWxH | reg: Nx2xWxH
+        target: 
+                hm: NxCxWxH | wh: NxKx2 | reg: NxKx2 | indices: NxK
+        '''
+        indices = target[3]
+        mask = target[3] > 0
+        hm_loss = self.hm_loss(output[0], target[0]) * weights[0]
+        wh_loss = self.wh_loss(output[1], mask, indices, target[1])*weights[1]
+        reg_loss = self.reg_loss(output[2], mask, indices, target[2])*weights[2]
+
+        total_loss = hm_loss + wh_loss + reg_loss
+        loss_dict = {
+            'total_loss': total_loss,
+            'hm_loss': hm_loss,
+            'wh_loss': wh_loss,
+            'reg_loss': reg_loss
+        }
+        return total_loss, loss_dict

@@ -27,7 +27,7 @@ def letterbox(size, im, boxes, color=(114, 114, 114), stride=32):
 
     dw /= 2  # divide padding into 2 sides
     dh /= 2
-    boxes = boxes.astype('float32')
+    boxes = np.array(boxes).astype('float32')
     if shape[::-1] != new_unpad:  # resize
         im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
         boxes[..., [0, 2]] *= new_unpad[0]/shape[1]
@@ -50,13 +50,14 @@ def load_data(img_dirs):
     label_paths = []
     for img_dir in img_dirs:
         lb_dir = img_dir.replace('images', 'annotations')
+        
         for name in os.listdir(img_dir):
             if not check_is_image(name):
                 continue
             image_paths.append(os.path.join(img_dir,  name))
             label_paths.append(os.path.join(lb_dir,  '.'.join(name.split('.')[:-1])+'.xml'))
     
-    print('Scanning: ', end='')
+    print('Scanning: ')
     background = 0
     data = []
     pbar = tqdm(enumerate(image_paths), total=len(image_paths))
@@ -64,7 +65,7 @@ def load_data(img_dirs):
         xp = label_paths[i]
         if os.path.exists(xp):
             boxes, class_names = parse_xml(xp)
-            data += {'im_path':fp, 'boxes':boxes, 'class_names':class_names}
+            data.append({'im_path':fp, 'boxes':boxes, 'class_names':class_names})
         else:
             background += 1
         
@@ -122,9 +123,9 @@ class Generator(Dataset):
         item['image'], item['boxes'] = self.resizer(self.input_size, item['image'], item['boxes']) #512x512
         item['image'] = self.preprocess_image(item['image'])
 
-        hm, wh, reg, indices = self.assigner(item['boxes'], item['class_id'])
+        hm, wh, reg, indices = self.assigner(item['boxes'], item['class_ids'])
 
-        return hm, wh, reg, indices
+        return item['image'], (hm, wh, reg, indices)
 
     def preprocess_image(self, image):
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)

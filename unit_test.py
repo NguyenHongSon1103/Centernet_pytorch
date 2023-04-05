@@ -1,8 +1,9 @@
 import torch
 import numpy as np
+import yaml
+
 
 def test_model():
-    import yaml
     from model import Model
     with open('yolov8n.yaml') as f:
         d = yaml.safe_load(f)
@@ -33,5 +34,23 @@ def test_loss():
 
     print(hm_loss, wh_loss)
 
+def test_generator():
+    from dataset.generator import Generator
+    from torch.utils.data import DataLoader
+
+    with open('config/default.yaml') as f:
+        cfg = yaml.safe_load(f)
+    
+    train_dataset = Generator(cfg, mode='train')
+    val_dataset   = Generator(cfg, mode='val')
+    train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=cfg['batch_size'], num_workers=4)
+    val_loader    = DataLoader(val_dataset, batch_size=cfg['batch_size'], num_workers=4)
+
+    for i, d in enumerate(train_loader):
+        print(d[0].shape)
+        print(d[1][0].shape, d[1][1].shape, d[1][2].shape, d[1][3].shape)
+        if i == 5: 
+            assert False
+
 if __name__ == '__main__':
-    test_loss()
+    test_generator()

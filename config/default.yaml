@@ -2,6 +2,8 @@
 nc : 1
 names : 
   polyps : 0
+  adenomatous : 0
+  hyperplastic : 0
 
 #----------------------- 
 # Model architecture One of ['tiny', 's', 'm', 'l', 'x']
@@ -9,25 +11,27 @@ names :
 version: 'n'
 
 #-----------------------
-# data path
+# Data path
 #-----------------------
-train: /Users/LAP60311/work/Contract/poc_ACB_data/data/train/images
-val: /Users/LAP60311/work/Contract/poc_ACB_data/data/val/images
+# train: /Users/LAP60311/work/Contract/poc_ACB_data/data/train/images
+# val: /Users/LAP60311/work/Contract/poc_ACB_data/data/val/images
 # test: /home/s/sonnh/polyp_data/test/images
-
+train : D:/VNG/E2EObjectDetection/dummy/images
+val : D:/VNG/E2EObjectDetection/dummy/images
 #-----------------------
-# data configs
+# Training configs
 #-----------------------
 input_size : 640
-max_objects : 100
-model_dir : ''
 batch_size : 16
 epochs : 100
-resume : False
-
 optimizer :
   type : Adam
   base_lr : 1e-3
   end_lr : 1e-5
   warmup_lr : 2e-5
   warmup_steps : 10000
+
+max_objects : 100
+save_dir : ''
+save_period: -1
+resume : False

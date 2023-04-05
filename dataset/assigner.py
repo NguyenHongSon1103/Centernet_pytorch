@@ -16,7 +16,7 @@ class Assigner:
 
     def __call__(self, boxes ,class_ids):
 
-        hm, wh, reg, indices = self.compute_targets(boxes, class_ids)
+        hm, wh, reg, indices = self.compute_target(boxes, class_ids)
         return hm, wh, reg, indices
 
     def get_heatmap_per_box(self, heatmap, cls_id, ct_int, size):
