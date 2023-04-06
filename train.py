@@ -30,12 +30,14 @@ val_dataset   = Generator(cfg, mode='val')
 train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=cfg['batch_size'], num_workers=4)
 val_loader    = DataLoader(val_dataset, shuffle=False, batch_size=cfg['batch_size'], num_workers=4)
 
-val_dataset.generate_coco_format(os.path.join(cfg['save_dir'], 'val_labels.json'))
+if not os.path.exists(os.path.join(cfg['save_dir'], 'val_labels.json')):
+    val_dataset.generate_coco_format(os.path.join(cfg['save_dir'], 'val_labels.json'))
 ## Load model
 model = Model(version=cfg['version'], nc=cfg['nc'], max_boxes=cfg['max_boxes'], is_training=True)
-summary(model, input_size=(1, 3, cfg['input_size'], cfg['input_size']))
+device = torch.device('cuda:'+cfg['gpu']) if torch.cuda.is_available() else torch.device('cpu')
+model.to(device)
 
-## Get optimizer and loss
+summary(model, input_size=(1, 3, cfg['input_size'], cfg['input_size']))## Get optimizer and loss
 opt_cfg = cfg['optimizer']
 optimizer = torch.optim.Adam(model.parameters(), lr=opt_cfg['base_lr'])
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
@@ -43,6 +45,6 @@ scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
 
 loss_fn = Loss()
 
-trainer = BaseTrainer(model, loss_fn, optimizer, cfg['gpu'], train_loader, val_loader, scheduler, cfg['epochs'], cfg)
+trainer = BaseTrainer(model, loss_fn, optimizer, device, train_loader, val_loader, scheduler, cfg['epochs'], cfg)
 
 trainer.train()

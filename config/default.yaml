@@ -15,17 +15,17 @@ version: 'n'
 #-----------------------
 # Data path
 #-----------------------
-train: /Users/LAP60311/work/Contract/poc_ACB_data/data/val/images
-val: /Users/LAP60311/work/Contract/poc_ACB_data/data/val/images
+train: /data/sonnh8/Contract/new_contract_block_data/train/images
+val: /data/sonnh8/Contract/new_contract_block_data/val/images
 # test: /home/s/sonnh/polyp_data/test/images
 # train : D:/VNG/E2EObjectDetection/dummy/images
 # val : D:/VNG/E2EObjectDetection/dummy/images
 #-----------------------
 # Training configs
 #-----------------------
-gpu : 0
+gpu : '0'
 input_size : 640
-batch_size : 16
+batch_size : 8
 epochs : 100
 optimizer :
   type : Adam

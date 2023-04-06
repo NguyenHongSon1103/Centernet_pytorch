@@ -106,6 +106,7 @@ class ImplicitM(nn.Module):
         nn.init.normal_(self.implicit, mean=self.mean, std=self.std)
 
     def forward(self, x):
+        print(self.implicit.device, x.device)
         return self.implicit * x
 
 class Head(nn.Module):

@@ -67,8 +67,9 @@ class BaseTrainer:
 
         pbar = tqdm(enumerate(self.data_loader))
         for batch_idx, (data, target) in pbar:
-            data, target = data.to(self.device), target.to(self.device)
-
+            data = data.to(self.device).permute(0, 3, 1, 2)
+            target = [tg.to(self.device) for tg in target]
+            #transpose image to 3xHxC
             self.optimizer.zero_grad()
             output = self.model(data)
             loss, loss_dict = self.loss_fn(output, target)
@@ -110,7 +111,7 @@ class BaseTrainer:
         with torch.no_grad():
             pbar = tqdm(enumerate(self.valid_data_loader), desc='%10s    '*2%('mAP50', 'mAP50-95'))
             for batch_idx, (data, target, im_paths) in pbar:
-                data, target = data.to(self.device), target.to(self.device)
+                data, target = data.to(self.device), [tg.to(self.device) for tg in target]
 
                 output = self.model(data)
                 predictions = self.model.decoder(output).to('cpu').numpy()

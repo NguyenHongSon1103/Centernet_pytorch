@@ -107,6 +107,13 @@ class Model(nn.Module):
         with open('yolov8n.yaml') as f:
             d = yaml.safe_load(f)
         self.backbone, _ = parse_model(d, 3, version)
+        try: 
+            v8_pretrained = '/data/sonnh8/yolov8/pretrained_weights/yolov8%s.pt'%version
+            self.backbone.load_state_dict(torch.load(v8_pretrained), strict=False)
+            print('Load successfully yolov8 backbone weights !')
+        except:
+            print('Cannot load yolov8 backbone weights !')
+            pass
 
         #neck
         self.layer_10_13 = nn.Upsample(None, 2, 'nearest')
