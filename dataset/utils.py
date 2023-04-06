@@ -2,37 +2,125 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import json
 import cv2
+import sys
+import cv2
+import numpy as np
+
+class HiddenPrints:
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, 'w')
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout.close()
+        sys.stdout = self._original_stdout
+
+class Resizer:
+    def __init__(self, size=(640, 640), mode='letterbox') -> None:
+        self.size = (size, size) if isinstance(size, int) else self.size
+        self.mode = mode
+    
+    def __call__(self, image, boxes):
+        if self.mode == 'letterbox':
+            new_img, new_boxes = self.letterbox(image, boxes)
+        elif self.mode == 'keep':
+            new_img, new_boxes = self.resize_keep_ar(image, boxes)
+        elif self.mode == 'no keep':
+            new_img, new_boxes = self.resize_wo_keep_ar(image, boxes)
+        else:
+            print('method %s not support yet'%self.mode)
+            assert False
+        return new_img, new_boxes
+    
+    def rescale_boxes(self, boxes, original_shape):
+        'img1_shape, boxes, img0_shape'
+        h, w = original_shape[:2]
+        scale_w = self.size[0] / w
+        scale_h = self.size[1] / h
+        boxes = np.array(boxes)
+        if self.mode == 'letterbox':
+            # Rescale boxes (xyxy) from img1_shape to img0_shape
+            gain = min(scale_w, scale_h)  # gain  = old / new
+            pad = (self.size[0] - w * gain) / 2, (self.size[1] - h * gain) / 2  # wh padding
+
+            boxes[..., [0, 2]] -= pad[0]  # x padding
+            boxes[..., [1, 3]] -= pad[1]  # y padding
+            boxes[..., :4] /= gain
+            # clip_boxes(boxes, img0_shape)
+            
+        elif self.mode == 'keep':
+            scale = min(scale_w, scale_h)
+            boxes = boxes / scale
+
+        elif self.mode == 'no keep':
+            '''Not implement'''
+            pass
+        else:
+            print('method %s not support yet'%self.mode)
+            assert False
+
+        return boxes
+
+    def resize_keep_ar(self, image, boxes):
+        h, w, c = image.shape
+        scale_w = self.size[0] / w
+        scale_h = self.size[1] / h
+        scale = min(scale_w, scale_h)
+        h = int(h * scale)
+        w = int(w * scale)
+        padimg = np.zeros((self.size[0], self.size[1], c), image.dtype)
+        padimg[:h, :w] = cv2.resize(image, (w, h))
+        new_anns = []
+        for box in boxes:
+            box = np.array(box).astype(np.float32)
+            box *= scale
+            new_anns.append(box)
+        return padimg, new_anns
+
+    def resize_wo_keep_ar(self, image, boxes):
+        h, w, c = image.shape
+        resized = cv2.resize(image, self.size)
+        scale_h, scale_w = self.size[1]/h, self.size[0]/w
+        new_anns = []
+        for box in boxes:
+            xmin, ymin, xmax, ymax = box
+            xmin, xmax = xmin * scale_w, xmax * scale_w
+            ymin, ymax = ymin * scale_h, ymax * scale_h
+            new_anns.append([xmin, ymin, xmax, ymax])
+        return resized, new_anns
+    
+    def letterbox(self, im, boxes, color=(114, 114, 114), stride=32):
+        ## auto = True, scaleup = False
+        # Resize and pad image while meeting stride-multiple constraints
+        shape = im.shape[:2]  # current shape [height, width]
+        # if isinstance(size, int):
+        #     new_shape = (size, size)
+        # else: new_shape = size
+        new_shape = [self.size[0], self.size[1]]
+        # Scale ratio (new / old)
+        r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+        r = min(r, 1.0)
+
+        # Compute padding
+        new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r)) # w, h
+        dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
+
+        dw /= 2  # divide padding into 2 sides
+        dh /= 2
+        boxes = np.array(boxes).astype('float32')
+        if shape[::-1] != new_unpad:  # resize
+            im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
+            boxes[..., [0, 2]] *= new_unpad[0]/shape[1]
+            boxes[..., [1, 3]] *= new_unpad[1]/shape[0]
+        top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+        left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+        im = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
+        boxes[..., [0, 2]] += dw
+        boxes[..., [1, 3]] += dh
+        return im, boxes.astype('int32')
 
 def check_is_image(name:str):
     return name.endswith(('.jpg', '.png', '.jpeg'))
-
-def resize_keep_ar(size, image, boxes):
-    h, w, c = image.shape
-    scale_w = size / w
-    scale_h = size / h
-    scale = min(scale_w, scale_h)
-    h = int(h * scale)
-    w = int(w * scale)
-    padimg = np.zeros((size, size, c), image.dtype)
-    padimg[:h, :w] = cv2.resize(image, (w, h))
-    new_anns = []
-    for box in boxes:
-        box = np.array(box).astype(np.float32)
-        box *= scale
-        new_anns.append(box)
-    return padimg, new_anns
-
-def resize_wo_keep_ar(size, image, boxes):
-    h, w, c = image.shape
-    resized = cv2.resize(image, (size, size))
-    scale_h, scale_w = size/h, size/w
-    new_anns = []
-    for box in boxes:
-        xmin, ymin, xmax, ymax = box
-        xmin, xmax = xmin * scale_w, xmax * scale_w
-        ymin, ymax = ymin * scale_h, ymax * scale_h
-        new_anns.append([xmin, ymin, xmax, ymax])
-    return resized, new_anns
 
 def parse_coco_json(path):
     with open(path, 'r') as f:

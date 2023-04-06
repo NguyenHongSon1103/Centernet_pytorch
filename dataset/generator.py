@@ -1,3 +1,4 @@
+import json
 import os
 import cv2
 from torch.utils.data import Dataset
@@ -6,38 +7,9 @@ import numpy as np
 from .augmenter import VisualAugmenter, MiscAugmenter, AdvancedAugmenter
 from .assigner import Assigner
 from copy import deepcopy
-from .utils import parse_xml, check_is_image
+from .utils import parse_xml, check_is_image, Resizer
 from tqdm import tqdm
-
-def letterbox(size, im, boxes, color=(114, 114, 114), stride=32):
-    ## auto = True, scaleup = False
-    # Resize and pad image while meeting stride-multiple constraints
-    shape = im.shape[:2]  # current shape [height, width]
-    if isinstance(size, int):
-        new_shape = (size, size)
-    else: new_shape = size
-
-    # Scale ratio (new / old)
-    r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
-    r = min(r, 1.0)
-
-    # Compute padding
-    new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r)) # w, h
-    dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
-
-    dw /= 2  # divide padding into 2 sides
-    dh /= 2
-    boxes = np.array(boxes).astype('float32')
-    if shape[::-1] != new_unpad:  # resize
-        im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
-        boxes[..., [0, 2]] *= new_unpad[0]/shape[1]
-        boxes[..., [1, 3]] *= new_unpad[1]/shape[0]
-    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
-    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-    im = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
-    boxes[..., [0, 2]] += dw
-    boxes[..., [1, 3]] += dh
-    return im, boxes.astype('int32')
+from PIL import Image
 
 def load_data(img_dirs):
     '''
@@ -83,12 +55,12 @@ class Generator(Dataset):
             hparams: a config dictionary
         """
         self.img_dirs = hparams[mode]
-        self.resizer = letterbox
         self.batch_size = hparams['batch_size']
         self.input_size = hparams['input_size']
+        self.resizer = Resizer(self.input_size, mode='letterbox')
         self.stride = 4
         self.output_size = self.input_size // self.stride
-        self.max_objects = hparams['max_objects']
+        self.max_objects = hparams['max_boxes']
         self.num_classes = hparams['nc']
         self.mode = mode
         self.mapper = hparams['names']
@@ -120,10 +92,12 @@ class Generator(Dataset):
             item = self.visual_augmenter(item)
             item = self.misc_augmenter(item)
 
-        item['image'], item['boxes'] = self.resizer(self.input_size, item['image'], item['boxes']) #512x512
+        item['image'], item['boxes'] = self.resizer(item['image'], item['boxes']) #640x640
         item['image'] = self.preprocess_image(item['image'])
 
         hm, wh, reg, indices = self.assigner(item['boxes'], item['class_ids'])
+        if self.mode == 'val':
+            return item['image'], (hm, wh, reg, indices), d['im_path']
 
         return item['image'], (hm, wh, reg, indices)
 
@@ -137,3 +111,51 @@ class Generator(Dataset):
         image = image.astype(np.uint8)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         return image
+
+    def generate_coco_format(self, save_path):
+        class_names = self.mapper.keys()
+        # for evaluation with pycocotools
+        dataset = {"categories": [], "annotations": [], "images": []}
+        for i, class_name in enumerate(class_names):
+            dataset["categories"].append(
+                {"id": i, "name": class_name, "supercategory": ""}
+            )
+
+        ann_id = 0
+        print('Check annotations ...')
+        for i, item in enumerate(self.data):
+            name = item['im_path'].split('/')[-1]
+            img_id = os.path.splitext(name)[0]
+            img_w, img_h = Image.open(item['im_path']).size
+            dataset["images"].append(
+                {
+                    "file_name": name,
+                    "id": img_id,
+                    "width": img_w,
+                    "height": img_h,
+                }
+            )
+            boxes, obj_names = item['boxes'], item['class_names']
+            for box, obj_name in zip(boxes, obj_names):
+                x1, y1, x2, y2 = [float(p) for p in box]
+                # cls_id starts from 0
+                cls_id = self.mapper[obj_name]
+                w = max(0, x2 - x1)
+                h = max(0, y2 - y1)
+                dataset["annotations"].append(
+                    {
+                        "area": h * w,
+                        "bbox": [x1, y1, w, h],
+                        "category_id": cls_id,
+                        "id": ann_id,
+                        "image_id": img_id,
+                        "iscrowd": 0,
+                        # mask
+                        "segmentation": [],
+                    }
+                )
+                ann_id += 1
+
+        with open(save_path, "w") as f:
+            json.dump(dataset, f)
+        print(f"Convert to COCO format finished. Resutls saved in {save_path}")

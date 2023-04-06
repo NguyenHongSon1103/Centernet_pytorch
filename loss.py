@@ -7,7 +7,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .modules import _transpose_and_gather_feat
+from modules import _transpose_and_gather_feat
 
 def _neg_loss(pred, gt):
     ''' Modified focal loss. Exactly the same as CornerNet.

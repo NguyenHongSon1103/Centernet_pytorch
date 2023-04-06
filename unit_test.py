@@ -46,9 +46,11 @@ def test_generator():
     train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=cfg['batch_size'], num_workers=4)
     val_loader    = DataLoader(val_dataset, batch_size=cfg['batch_size'], num_workers=4)
 
-    for i, d in enumerate(train_loader):
+    # val_dataset.generate_coco_format('val_labels.json')
+    for i, d in enumerate(val_loader):
         print(d[0].shape)
         print(d[1][0].shape, d[1][1].shape, d[1][2].shape, d[1][3].shape)
+        print(d[2])
         if i == 5: 
             assert False
 

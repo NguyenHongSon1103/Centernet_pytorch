@@ -1,9 +1,11 @@
 
-nc : 1
+nc : 2
 names : 
-  polyps : 0
-  adenomatous : 0
-  hyperplastic : 0
+  # polyps : 0
+  # adenomatous : 0
+  # hyperplastic : 0
+  party: 0
+  bank : 1
 
 #----------------------- 
 # Model architecture One of ['tiny', 's', 'm', 'l', 'x']
@@ -13,25 +15,27 @@ version: 'n'
 #-----------------------
 # Data path
 #-----------------------
-# train: /Users/LAP60311/work/Contract/poc_ACB_data/data/train/images
-# val: /Users/LAP60311/work/Contract/poc_ACB_data/data/val/images
+train: /Users/LAP60311/work/Contract/poc_ACB_data/data/val/images
+val: /Users/LAP60311/work/Contract/poc_ACB_data/data/val/images
 # test: /home/s/sonnh/polyp_data/test/images
-train : D:/VNG/E2EObjectDetection/dummy/images
-val : D:/VNG/E2EObjectDetection/dummy/images
+# train : D:/VNG/E2EObjectDetection/dummy/images
+# val : D:/VNG/E2EObjectDetection/dummy/images
 #-----------------------
 # Training configs
 #-----------------------
+gpu : 0
 input_size : 640
 batch_size : 16
 epochs : 100
 optimizer :
   type : Adam
-  base_lr : 1e-3
-  end_lr : 1e-5
-  warmup_lr : 2e-5
+  base_lr : 0.001 #1e-3
+  end_lr : 0.00001 #1e-5
+  warmup_lr : 0.00002 #2e-5
   warmup_steps : 10000
 
-max_objects : 100
-save_dir : ''
-save_period: -1
+max_boxes : 100
+save_dir : 'save_dir/test'
+save_period: 1
 resume : False
+resume_checkpoint : ''

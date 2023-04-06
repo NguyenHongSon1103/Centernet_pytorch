@@ -89,7 +89,7 @@ class Neck(nn.Module):
         return x
 
 class Model(nn.Module):
-    def __init__(self, version='n', nc=80, is_training=True):
+    def __init__(self, version='n', nc=80, max_boxes= 100, is_training=True):
         super().__init__()
         scales = dict(
         # [depth, width, max_channels]
@@ -118,6 +118,7 @@ class Model(nn.Module):
         self.head = IHead(ch, nc)
         
         self.is_training = is_training
+        self.decoder = Decoder(max_boxes)
         
     def forward(self, inp):
         assert inp.shape[1] == 3
@@ -138,6 +139,6 @@ class Model(nn.Module):
         out = self.neck(out_bb[-1], out_12, out_15)
         out = self.head(out)
         if not self.is_training:
-            detections = Decoder(100)(out)
+            detections = self.decoder(out)
             return detections
         return out

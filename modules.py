@@ -267,7 +267,7 @@ def ctdet_decode(heat, wh, reg=None, cat_spec_wh=False, K=100):
                         ys - wh[..., 1:2] / 2,
                         xs + wh[..., 0:1] / 2, 
                         ys + wh[..., 1:2] / 2], dim=2)
-    detections = torch.cat([bboxes, scores, clses], dim=2)
+    detections = torch.cat([bboxes, scores, clses], dim=2) #N x max_boxes x (C+4)
       
     return detections
 

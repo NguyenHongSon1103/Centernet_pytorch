@@ -1,11 +1,14 @@
 '''
 Trainer follow by Pytorch_template
 '''
+import json
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import os
 from tqdm import tqdm
+from PIL import Image
+from eval import evaluate
 
 class BaseTrainer:
     def __init__(self,  model, loss_fn, optimizer, device,
@@ -33,10 +36,12 @@ class BaseTrainer:
         # setup visualization writer instance             
         self.writer = SummaryWriter(os.path.join(self.checkpoint_dir, 'runs'))   
     
-        if config['resume'] is not None:
-            self._resume_checkpoint(config['resume'])
+        if config['resume']:
+            self._resume_checkpoint(config['resume_checkpoint'])
         
         self.loss_keys = ['hm_loss', 'wh_loss', 'reg_loss', 'total_loss']
+        self.val_metrics = {'mAP50':[], 'mAP50-95':[]}
+        self.resizer = self.data_loader.dataset.resizer
     
     def _update_history_loss(self, loss_dict):
         for key in self.loss_keys:
@@ -44,7 +49,7 @@ class BaseTrainer:
     
     def _write_tensorboard(self, loss_dict, global_step):
         for key in self.loss_keys:
-            self.writer.add_scalar(key, loss_dict[key], global_step=global_step)
+            self.writer.add_scalar(key, loss_dict[key], global_step=global_step)        
 
     def _train_epoch(self, epoch):
         """
@@ -56,6 +61,10 @@ class BaseTrainer:
         self.model.train()
         
         self.history_loss = {key:[] for key in self.loss_keys}
+
+        key_nums = len(self.loss_keys) + 1
+        print('%s    '*key_nums%tuple(['Epoch']+self.loss_keys))
+
         pbar = tqdm(enumerate(self.data_loader))
         for batch_idx, (data, target) in pbar:
             data, target = data.to(self.device), target.to(self.device)
@@ -66,67 +75,87 @@ class BaseTrainer:
             loss.backward()
             self.optimizer.step()
 
+            #Convert tensor to scalar    
+            loss_dict = {key:loss_dict[key].item() for key in loss_dict}
+
+            pbar.set_description('%10.4f    '*key_nums%tuple([epoch]+ [loss_dict[key] for key in loss_dict]))
+
             #Update history loss:
             self._update_history_loss(self, loss_dict)
             
+            #Write tensorboard
             if batch_idx % self.log_step == 0:
                 global_step = (epoch - 1) * self.epochs + batch_idx
                 self._write_tensorboard(loss_dict, global_step)
-                
-            if batch_idx == self.len_epoch:
-                break
-        log = self.train_metrics.result()
 
         if self.do_validation:
-            val_log = self._valid_epoch(epoch)
-            log.update(**{'val_'+k : v for k, v in val_log.items()})
+            self.valid_data_loader.shuffle=False
+            metrics = self._valid_epoch(epoch)
+            for key in metrics:
+                self.val_metrics[key].append(metrics[key])
 
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()
-        return log
+
+    def _valid_epoch(self, epoch):
+        """
+        Validate after training an epoch
+
+        :param epoch: Integer, current training epoch.
+        :return: A log that contains information about validation
+        """
+        self.model.eval()
+        metrics = {'mAP50':0, 'mAP50-95':0}
+        all_predictions = []
+        with torch.no_grad():
+            pbar = tqdm(enumerate(self.valid_data_loader), desc='%10s    '*2%('mAP50', 'mAP50-95'))
+            for batch_idx, (data, target, im_paths) in pbar:
+                data, target = data.to(self.device), target.to(self.device)
+
+                output = self.model(data)
+                predictions = self.model.decoder(output).to('cpu').numpy()
+                
+                for prediction, im_path in zip(predictions, im_paths):
+                    all_predictions.append({'im_path':im_path, 'pred':prediction})
+            ## Phần này tính mAP trong này ##
+            save_path = os.path.join(self.config['save_dir'], 'val_predictions.json')
+            self.generate_coco_format_predict(all_predictions, save_path)
+            stats = evaluate(os.path.join(self.config['save_dir'], 'val_labels.json'),
+                            save_path)
+            metrics['mAP50'] = np.mean([s[1] for s in stats])
+            metrics['mAP50-95'] = np.mean([s[0] for s in stats])
+            ## ----------------------------##
+
+            print('%10.4f    '*2%tuple(metrics[key] for key in metrics))
+
+            #Write tensorboard
+            self._write_tensorboard(metrics, epoch)
+        return metrics
 
     def train(self):
         """
         Full training logic
         """
-        not_improved_count = 0
+        best_mAP50_95 = 0
         for epoch in range(self.start_epoch, self.epochs + 1):
-            result = self._train_epoch(epoch)
+            self._train_epoch(epoch)
 
             # save logged informations into log dict
-            log = {'epoch': epoch}
-            log.update(result)
+            log = []
+            for key in self.history_loss:
+                log.append({key:self.history_loss[key]})
+            
+            for key in self.val_metrics[-1]:
+                log[-1][key] = self.val_metrics[-1][key]
 
-            # print logged informations to the screen
-            for key, value in log.items():
-                self.logger.info('    {:15s}: {}'.format(str(key), value))
-
-            # evaluate model performance according to configured metric, save best checkpoint as model_best
-            best = False
-            if self.mnt_mode != 'off':
-                try:
-                    # check whether model performance improved or not, according to specified metric(mnt_metric)
-                    improved = (self.mnt_mode == 'min' and log[self.mnt_metric] <= self.mnt_best) or \
-                               (self.mnt_mode == 'max' and log[self.mnt_metric] >= self.mnt_best)
-                except KeyError:
-                    self.logger.warning("Warning: Metric '{}' is not found. "
-                                        "Model performance monitoring is disabled.".format(self.mnt_metric))
-                    self.mnt_mode = 'off'
-                    improved = False
-
-                if improved:
-                    self.mnt_best = log[self.mnt_metric]
-                    not_improved_count = 0
-                    best = True
-                else:
-                    not_improved_count += 1
-
-                if not_improved_count > self.early_stop:
-                    self.logger.info("Validation performance didn\'t improve for {} epochs. "
-                                     "Training stops.".format(self.early_stop))
-                    break
-
+            
+            #  save best checkpoint as model_best
             if epoch % self.save_period == 0:
+                if log[-1]['mAP50-95'] > best_mAP50_95: 
+                    best=True
+                    best_mAP50_95 = log[-1]['mAP50-95']
+                else:
+                    best=False
                 self._save_checkpoint(epoch, save_best=best)
 
     def _save_checkpoint(self, epoch, save_best=False):
@@ -142,16 +171,14 @@ class BaseTrainer:
             'epoch': epoch,
             'state_dict': self.model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
-            'monitor_best': self.mnt_best,
-            'config': self.config
         }
         filename = str(self.checkpoint_dir / 'checkpoint-epoch{}.pth'.format(epoch))
         torch.save(state, filename)
-        self.logger.info("Saving checkpoint: {} ...".format(filename))
+        print("Saving checkpoint: {} ...".format(filename))
         if save_best:
             best_path = str(self.checkpoint_dir / 'model_best.pth')
             torch.save(state, best_path)
-            self.logger.info("Saving current best: model_best.pth ...")
+            print("Saving current best: model_best.pth ...")
 
     def _resume_checkpoint(self, resume_path):
         """
@@ -159,127 +186,59 @@ class BaseTrainer:
         :param resume_path: Checkpoint path to be resumed
         """
         resume_path = str(resume_path)
-        self.logger.info("Loading checkpoint: {} ...".format(resume_path))
+        print("Loading checkpoint: {} ...".format(resume_path))
         checkpoint = torch.load(resume_path)
         self.start_epoch = checkpoint['epoch'] + 1
-        self.mnt_best = checkpoint['monitor_best']
 
         # load architecture params from checkpoint.
         if checkpoint['config']['arch'] != self.config['arch']:
-            self.logger.warning("Warning: Architecture configuration given in config file is different from that of "
+            print("Warning: Architecture configuration given in config file is different from that of "
                                 "checkpoint. This may yield an exception while state_dict is being loaded.")
         self.model.load_state_dict(checkpoint['state_dict'])
 
         # load optimizer state from checkpoint only when optimizer type is not changed.
         if checkpoint['config']['optimizer']['type'] != self.config['optimizer']['type']:
-            self.logger.warning("Warning: Optimizer type given in config file is different from that of checkpoint. "
+            print("Warning: Optimizer type given in config file is different from that of checkpoint. "
                                 "Optimizer parameters not being resumed.")
         else:
             self.optimizer.load_state_dict(checkpoint['optimizer'])
 
-        self.logger.info("Checkpoint loaded. Resume training from epoch {}".format(self.start_epoch))
+        print("Checkpoint loaded. Resume training from epoch {}".format(self.start_epoch))
     
-
-class Trainer(BaseTrainer):
-    """
-    Trainer class
-    """
-    def __init__(self, model, criterion, metric_ftns, optimizer, config, device,
-                 data_loader, valid_data_loader=None, lr_scheduler=None, epochs=None):
-        super().__init__(model, criterion, metric_ftns, optimizer, config)
-        self.config = config
-        self.device = device
-        self.data_loader = data_loader
-        if len_epoch is None:
-            # epoch-based training
-            self.len_epoch = len(self.data_loader)
-        else:
-            # iteration-based training
-            self.data_loader = inf_loop(data_loader)
-            self.len_epoch = len_epoch
-        self.valid_data_loader = valid_data_loader
-        self.do_validation = self.valid_data_loader is not None
-        self.lr_scheduler = lr_scheduler
-        self.log_step = int(np.sqrt(data_loader.batch_size))
-
-        self.train_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
-        self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
-
-    def _train_epoch(self, epoch):
+    def generate_coco_format_predict(self, all_predictions, save_path):
         """
-        Training logic for an epoch
+        Use the pycocotools to evaluate a COCO model on a dataset.
 
-        :param epoch: Integer, current training epoch.
-        :return: A log that contains average loss and metric in this epoch.
+        Args
+            all_predictions: All predictions on validation set (May be harm if large val set ?)
+            save_path: direction to save preditions json file
         """
-        self.model.train()
-        self.train_metrics.reset()
-        for batch_idx, (data, target) in enumerate(self.data_loader):
-            data, target = data.to(self.device), target.to(self.device)
+        # start collecting results
+        results = []
+        for i, item in enumerate(all_predictions):
+            detection = item['pred']
+            raw_boxes, scores, class_ids = detection[..., :4], detection[..., 4], detection[..., 5].astype('int32')
+            im_w, im_h = Image.open(item['im_path']).size
+            boxes = self.resizer.rescale_boxes(raw_boxes, (im_h, im_w))
+            name = item['im_path'].split('/')[-1]
+            for box, score, class_id in zip(boxes, scores, class_ids):
+                xmin, ymin, xmax, ymax = [float(p) for p in box]
+                w, h = max(0, xmax - xmin), max(0, ymax - ymin)  
 
-            self.optimizer.zero_grad()
-            output = self.model(data)
-            loss = self.criterion(output, target)
-            loss.backward()
-            self.optimizer.step()
+                # append detection for each positively labeled class
+                image_result = {
+                    'image_id': os.path.splitext(name)[0],
+                    'category_id': int(class_id),
+                    'score': float(score),
+                    'bbox': [xmin, ymin, w, h],
+                }
+                # append detection to results
+                results.append(image_result)
 
-            self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
-            self.train_metrics.update('loss', loss.item())
-            for met in self.metric_ftns:
-                self.train_metrics.update(met.__name__, met(output, target))
+        if not len(results):
+            print('No testset found')
+            return
 
-            if batch_idx % self.log_step == 0:
-                self.logger.debug('Train Epoch: {} {} Loss: {:.6f}'.format(
-                    epoch,
-                    self._progress(batch_idx),
-                    loss.item()))
-                self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
-
-            if batch_idx == self.len_epoch:
-                break
-        log = self.train_metrics.result()
-
-        if self.do_validation:
-            val_log = self._valid_epoch(epoch)
-            log.update(**{'val_'+k : v for k, v in val_log.items()})
-
-        if self.lr_scheduler is not None:
-            self.lr_scheduler.step()
-        return log
-
-    def _valid_epoch(self, epoch):
-        """
-        Validate after training an epoch
-
-        :param epoch: Integer, current training epoch.
-        :return: A log that contains information about validation
-        """
-        self.model.eval()
-        self.valid_metrics.reset()
-        with torch.no_grad():
-            for batch_idx, (data, target) in enumerate(self.valid_data_loader):
-                data, target = data.to(self.device), target.to(self.device)
-
-                output = self.model(data)
-                loss = self.criterion(output, target)
-
-                self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
-                self.valid_metrics.update('loss', loss.item())
-                for met in self.metric_ftns:
-                    self.valid_metrics.update(met.__name__, met(output, target))
-                self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
-
-        # add histogram of model parameters to the tensorboard
-        for name, p in self.model.named_parameters():
-            self.writer.add_histogram(name, p, bins='auto')
-        return self.valid_metrics.result()
-
-    def _progress(self, batch_idx):
-        base = '[{}/{} ({:.0f}%)]'
-        if hasattr(self.data_loader, 'n_samples'):
-            current = batch_idx * self.data_loader.batch_size
-            total = self.data_loader.n_samples
-        else:
-            current = batch_idx
-            total = self.len_epoch
-        return base.format(current, total, 100.0 * current / total)
+        # write output
+        json.dump(results, open(save_path, 'w'))
+        print(f"Prediction to COCO format finished. Resutls saved in {save_path}")
