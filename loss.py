@@ -132,25 +132,25 @@ class Loss(nn.Module):
         self.hm_loss = FocalLoss()
         self.wh_loss = RegLoss()
         self.reg_loss = RegLoss()
+        self.loss_keys = ['hm_loss', 'wh_loss', 'reg_loss', 'total_loss']
     
-    def forwar(self, output, target, weights=[1.0, 0.1, 1.0]):
+    def forward(self, output, target, weights=[1.0, 0.1, 1.0]):
         '''
         output: 
                 hm: NxCxWxH | wh: Nx2xWxH | reg: Nx2xWxH
         target: 
                 hm: NxCxWxH | wh: NxKx2 | reg: NxKx2 | indices: NxK
         '''
-        indices = target[3]
+        # for ts in target:
+        #     print(ts.shape)
+
+        indices = target[3].type(torch.int64)
         mask = target[3] > 0
-        hm_loss = self.hm_loss(output[0], target[0]) * weights[0]
+        hm_loss = self.hm_loss(output[0], target[0].permute(0, 3, 1, 2)) * weights[0]
         wh_loss = self.wh_loss(output[1], mask, indices, target[1])*weights[1]
         reg_loss = self.reg_loss(output[2], mask, indices, target[2])*weights[2]
 
         total_loss = hm_loss + wh_loss + reg_loss
-        loss_dict = {
-            'total_loss': total_loss,
-            'hm_loss': hm_loss,
-            'wh_loss': wh_loss,
-            'reg_loss': reg_loss
-        }
+        loss_dict = {key:value for key, value in zip(self.loss_keys, [hm_loss, wh_loss, reg_loss, total_loss])}
+       
         return total_loss, loss_dict

@@ -12,11 +12,12 @@ def evaluate(anno_json, pred_json):
     coco_pred = coco_true.loadRes(pred_json)
 
     # run COCO evaluation
-    coco_eval = COCOeval(coco_true, coco_pred, 'bbox')
-#     coco_eval.params.imgIds = image_ids
-    coco_eval.evaluate()
-    coco_eval.accumulate()
-    coco_eval.summarize()
+    with HiddenPrints():
+        coco_eval = COCOeval(coco_true, coco_pred, 'bbox')
+    #     coco_eval.params.imgIds = image_ids
+        coco_eval.evaluate()
+        coco_eval.accumulate()
+        coco_eval.summarize()
     return coco_eval.stats
 
 def evaluate_all(anno_json, pred_json):

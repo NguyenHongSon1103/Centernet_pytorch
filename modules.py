@@ -89,10 +89,12 @@ class ImplicitA(nn.Module):
         self.channel = channel
         self.mean = mean
         self.std = std
-        self.implicit = nn.Parameter(torch.zeros(1, channel, 1, 1))
+        self.implicit = nn.parameter.Parameter(torch.zeros(1, channel, 1, 1, device=torch.device('cuda:0')))
+        # self.register_parameter('implicit', self.implicit)
         nn.init.normal_(self.implicit, mean=self.mean, std=self.std)
 
     def forward(self, x):
+        self.implicit.to(torch.device('cuda:0'))
         return self.implicit + x
     
 
@@ -102,11 +104,11 @@ class ImplicitM(nn.Module):
         self.channel = channel
         self.mean = mean
         self.std = std
-        self.implicit = nn.Parameter(torch.ones(1, channel, 1, 1))
+        self.implicit = nn.parameter.Parameter(torch.empty(1, channel, 1, 1, device=torch.device('cuda:0')))
+        # self.register_parameter('implicit', self.implicit)
         nn.init.normal_(self.implicit, mean=self.mean, std=self.std)
 
     def forward(self, x):
-        print(self.implicit.device, x.device)
         return self.implicit * x
 
 class Head(nn.Module):
@@ -160,7 +162,7 @@ class IHead(nn.Module):
             self.ia,
             Conv(ch[0], ch[0], 3, 1),
             self.im,
-            nn.Conv2d(ch[0], nc, 1),
+            nn.Conv2d(ch[0], nc, 1, bias=True),
             nn.Sigmoid()
         )
 
@@ -181,6 +183,8 @@ class IHead(nn.Module):
             nn.Sigmoid()
         )
 
+        self._init_weights()
+
     def forward(self, x):
         x = self.conv3(self.conv2(self.conv1(x)))
         
@@ -189,6 +193,14 @@ class IHead(nn.Module):
         out_reg = self.reg_out(x)
 
         return out_hm, out_wh, out_reg
+    
+    def _init_weights(self):
+        for m in self.hm_out.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, -4.6)
+                
 
 def _sigmoid(x):
     y = torch.clamp(x.sigmoid_(), min=1e-4, max=1-1e-4)

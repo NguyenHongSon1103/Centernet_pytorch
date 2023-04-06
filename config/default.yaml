@@ -1,11 +1,11 @@
 
-nc : 2
+nc : 1
 names : 
-  # polyps : 0
-  # adenomatous : 0
-  # hyperplastic : 0
-  party: 0
-  bank : 1
+  polyps : 0
+  adenomatous : 0
+  hyperplastic : 0
+  # party: 0
+  # bank : 1
 
 #----------------------- 
 # Model architecture One of ['tiny', 's', 'm', 'l', 'x']
@@ -15,17 +15,17 @@ version: 'n'
 #-----------------------
 # Data path
 #-----------------------
-train: /data/sonnh8/Contract/new_contract_block_data/train/images
-val: /data/sonnh8/Contract/new_contract_block_data/val/images
+# train: /data/sonnh8/Contract/new_contract_block_data/train/images
+# val: /data/sonnh8/Contract/new_contract_block_data/val/images
 # test: /home/s/sonnh/polyp_data/test/images
-# train : D:/VNG/E2EObjectDetection/dummy/images
-# val : D:/VNG/E2EObjectDetection/dummy/images
+train : D:/VNG/E2EObjectDetection/dummy/images
+val : D:/VNG/E2EObjectDetection/dummy/images
 #-----------------------
 # Training configs
 #-----------------------
 gpu : '0'
 input_size : 640
-batch_size : 8
+batch_size : 2
 epochs : 100
 optimizer :
   type : Adam

@@ -48,7 +48,7 @@ class BaseTrainer:
             self.history_loss[key].append(loss_dict[key])
     
     def _write_tensorboard(self, loss_dict, global_step):
-        for key in self.loss_keys:
+        for key in loss_dict:
             self.writer.add_scalar(key, loss_dict[key], global_step=global_step)        
 
     def _train_epoch(self, epoch):
@@ -79,10 +79,10 @@ class BaseTrainer:
             #Convert tensor to scalar    
             loss_dict = {key:loss_dict[key].item() for key in loss_dict}
 
-            pbar.set_description('%10.4f    '*key_nums%tuple([epoch]+ [loss_dict[key] for key in loss_dict]))
+            pbar.set_description('%10d    '%epoch + '%10.4f    '*(key_nums-1)%tuple([loss_dict[key] for key in loss_dict]))
 
             #Update history loss:
-            self._update_history_loss(self, loss_dict)
+            self._update_history_loss(loss_dict)
             
             #Write tensorboard
             if batch_idx % self.log_step == 0:
@@ -111,6 +111,7 @@ class BaseTrainer:
         with torch.no_grad():
             pbar = tqdm(enumerate(self.valid_data_loader), desc='%10s    '*2%('mAP50', 'mAP50-95'))
             for batch_idx, (data, target, im_paths) in pbar:
+                data = data.to(self.device).permute(0, 3, 1, 2)
                 data, target = data.to(self.device), [tg.to(self.device) for tg in target]
 
                 output = self.model(data)
@@ -121,10 +122,10 @@ class BaseTrainer:
             ## Phần này tính mAP trong này ##
             save_path = os.path.join(self.config['save_dir'], 'val_predictions.json')
             self.generate_coco_format_predict(all_predictions, save_path)
-            stats = evaluate(os.path.join(self.config['save_dir'], 'val_labels.json'),
-                            save_path)
-            metrics['mAP50'] = np.mean([s[1] for s in stats])
-            metrics['mAP50-95'] = np.mean([s[0] for s in stats])
+            stats = evaluate(os.path.join(self.config['save_dir'], 'val_labels.json'), save_path)
+
+            metrics['mAP50'] = np.mean([s[1] for s in stats]) if self.config['nc']>1 else stats[1]
+            metrics['mAP50-95'] = np.mean([s[0] for s in stats]) if self.config['nc']>1 else stats[1]
             ## ----------------------------##
 
             print('%10.4f    '*2%tuple(metrics[key] for key in metrics))
@@ -146,8 +147,8 @@ class BaseTrainer:
             for key in self.history_loss:
                 log.append({key:self.history_loss[key]})
             
-            for key in self.val_metrics[-1]:
-                log[-1][key] = self.val_metrics[-1][key]
+            for key in self.val_metrics:
+                log[-1][key] = self.val_metrics[key][-1]
 
             
             #  save best checkpoint as model_best
@@ -173,7 +174,7 @@ class BaseTrainer:
             'state_dict': self.model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
         }
-        filename = str(self.checkpoint_dir / 'checkpoint-epoch{}.pth'.format(epoch))
+        filename = os.path.join(self.checkpoint_dir, 'checkpoint-epoch{}.pth'.format(epoch))
         torch.save(state, filename)
         print("Saving checkpoint: {} ...".format(filename))
         if save_best:
