@@ -89,12 +89,9 @@ class ImplicitA(nn.Module):
         self.channel = channel
         self.mean = mean
         self.std = std
-        self.implicit = nn.parameter.Parameter(torch.zeros(1, channel, 1, 1, device=torch.device('cuda:0')))
-        # self.register_parameter('implicit', self.implicit)
-        nn.init.normal_(self.implicit, mean=self.mean, std=self.std)
+        self.implicit = nn.parameter.Parameter(torch.zeros(1, channel, 1, 1))
 
     def forward(self, x):
-        self.implicit.to(torch.device('cuda:0'))
         return self.implicit + x
     
 
@@ -104,9 +101,7 @@ class ImplicitM(nn.Module):
         self.channel = channel
         self.mean = mean
         self.std = std
-        self.implicit = nn.parameter.Parameter(torch.empty(1, channel, 1, 1, device=torch.device('cuda:0')))
-        # self.register_parameter('implicit', self.implicit)
-        nn.init.normal_(self.implicit, mean=self.mean, std=self.std)
+        self.implicit = nn.Parameter(torch.zeros(1, channel, 1, 1))
 
     def forward(self, x):
         return self.implicit * x
@@ -172,6 +167,7 @@ class IHead(nn.Module):
             Conv(ch[0], ch[0], 3, 1),
             self.im,
             nn.Conv2d(ch[0], 2, 1),
+            nn.ReLU()
         )
 
         self.reg_out = nn.Sequential(
@@ -249,9 +245,6 @@ def _topk(scores, K=40):
     return topk_score, topk_inds, topk_clses, topk_ys, topk_xs
 
 def ctdet_decode(heat, wh, reg=None, cat_spec_wh=False, K=100):
-    '''
-    cat_spec_wh: Get K boxes for each class if True
-    '''
     batch, cat, height, width = heat.size()
 
     # heat = torch.sigmoid(heat)
@@ -280,7 +273,7 @@ def ctdet_decode(heat, wh, reg=None, cat_spec_wh=False, K=100):
                         ys - wh[..., 1:2] / 2,
                         xs + wh[..., 0:1] / 2, 
                         ys + wh[..., 1:2] / 2], dim=2)
-    detections = torch.cat([bboxes, scores, clses], dim=2) #N x max_boxes x (C+4)
+    detections = torch.cat([bboxes, scores, clses], dim=2)
       
     return detections
 

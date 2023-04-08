@@ -4,7 +4,7 @@ from pycocotools.cocoeval import COCOeval
 import json
 import xml.etree.ElementTree as ET
 import os
-from dataset.utils import HiddenPrints
+from utils import HiddenPrints
 
 def evaluate(anno_json, pred_json):
     # load results in COCO evaluation tool

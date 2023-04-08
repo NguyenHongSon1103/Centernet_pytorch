@@ -4,10 +4,12 @@ import cv2
 from torch.utils.data import Dataset
 import math
 import numpy as np
+import sys
+sys.path.append(os.getcwd())
 from .augmenter import VisualAugmenter, MiscAugmenter, AdvancedAugmenter
 from .assigner import Assigner
 from copy import deepcopy
-from .utils import parse_xml, check_is_image, Resizer
+from utils import parse_xml, check_is_image, Resizer
 from tqdm import tqdm
 from PIL import Image
 
@@ -91,20 +93,17 @@ class Generator(Dataset):
         if self.mode == 'train':
             item = self.visual_augmenter(item)
             item = self.misc_augmenter(item)
-
-        item['image'], item['boxes'] = self.resizer(item['image'], item['boxes']) #640x640
-        item['image'] = self.preprocess_image(item['image'])
+    
+        item['image'] = cv2.cvtColor(item['image'], cv2.COLOR_BGR2RGB)
+        item['image'] = self.resizer.resize_image(item['image'])
+        item['boxes'] = self.resizer.resize_boxes(item['boxes'], item['image'].shape[:2]) #640x640
+        item['image'] = item['image'].astype('float32') / 255.0
 
         hm, wh, reg, indices = self.assigner(item['boxes'], item['class_ids'])
         if self.mode == 'val':
             return item['image'], (hm, wh, reg, indices), d['im_path']
 
         return item['image'], (hm, wh, reg, indices)
-
-    def preprocess_image(self, image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image = image.astype(np.float32)
-        return image / 255.0
 
     def reverse_preprocess(self, image):
         image *= 255.0

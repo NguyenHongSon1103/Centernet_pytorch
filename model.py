@@ -72,7 +72,7 @@ class Neck(nn.Module):
         self.c2f_3 = C2f(ch[2], ch[0]) #for layer15
         
         self.ia = ImplicitA(ch[0]*3)
-        self.ims = [ImplicitM(ch[0]) for i in range(3)]
+        self.ims = nn.ModuleList([ImplicitM(ch[0]) for i in range(3)])
 
     def forward(self, out_9, out_12, out_15):
         up1 = nn.Upsample(None, 8, 'bilinear')(out_9)

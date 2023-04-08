@@ -4,8 +4,6 @@ names :
   polyps : 0
   adenomatous : 0
   hyperplastic : 0
-  # party: 0
-  # bank : 1
 
 #----------------------- 
 # Model architecture One of ['tiny', 's', 'm', 'l', 'x']
@@ -15,9 +13,7 @@ version: 'n'
 #-----------------------
 # Data path
 #-----------------------
-# train: /data/sonnh8/Contract/new_contract_block_data/train/images
-# val: /data/sonnh8/Contract/new_contract_block_data/val/images
-# test: /home/s/sonnh/polyp_data/test/images
+test: /home/s/sonnh/polyp_data/test/images
 train : D:/VNG/E2EObjectDetection/dummy/images
 val : D:/VNG/E2EObjectDetection/dummy/images
 #-----------------------
@@ -25,7 +21,7 @@ val : D:/VNG/E2EObjectDetection/dummy/images
 #-----------------------
 gpu : '0'
 input_size : 640
-batch_size : 2
+batch_size : 12
 epochs : 100
 optimizer :
   type : Adam
@@ -36,6 +32,6 @@ optimizer :
 
 max_boxes : 100
 save_dir : 'save_dir/test'
-save_period: 1
+save_period: 5
 resume : False
 resume_checkpoint : ''

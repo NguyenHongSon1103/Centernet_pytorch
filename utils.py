@@ -17,24 +17,60 @@ class HiddenPrints:
         sys.stdout = self._original_stdout
 
 class Resizer:
-    def __init__(self, size=(640, 640), mode='letterbox') -> None:
-        self.size = (size, size) if isinstance(size, int) else self.size
+    def __init__(self, size=(640, 640), mode='letterbox'):
+        self.size = (size, size) if isinstance(size, int) else size
+        assert mode in ['letterbox', 'keep', 'no keep'], "Unknown mode: %s"%mode
         self.mode = mode
     
-    def __call__(self, image, boxes):
+    def resize_image(self, image):
         if self.mode == 'letterbox':
-            new_img, new_boxes = self.letterbox(image, boxes)
+            new_img = self.letterbox(image)
         elif self.mode == 'keep':
-            new_img, new_boxes = self.resize_keep_ar(image, boxes)
+            new_img = self.resize_keep_ar(image)
         elif self.mode == 'no keep':
-            new_img, new_boxes = self.resize_wo_keep_ar(image, boxes)
-        else:
-            print('method %s not support yet'%self.mode)
-            assert False
-        return new_img, new_boxes
+            new_img = self.resize_wo_keep_ar(image)
+            
+        return new_img
+    
+    def resize_boxes(self, original_boxes, original_shape):
+        '''
+        Convert boxes from original image size back to preprocessed image size
+        '''
+        
+        h, w = original_shape[:2]
+        scale_w = self.size[0] / w
+        scale_h = self.size[1] / h
+        
+        boxes = np.copy(original_boxes).astype('float32')
+        if self.mode == 'letterbox':
+            r = min(scale_w, scale_h)
+            r = min(r, 1.0)
+            new_unpad = int(round(w * r)), int(round(h * r)) # w, h
+            dw, dh = self.size[0] - new_unpad[0], self.size[1] - new_unpad[1]  # wh padding
+
+            dw /= 2  # divide padding into 2 sides
+            dh /= 2
+            if [w, h] != new_unpad:
+                boxes[..., [0, 2]] *= new_unpad[0]/w
+                boxes[..., [1, 3]] *= new_unpad[1]/h
+            boxes[..., [0, 2]] += dw
+            boxes[..., [1, 3]] += dh
+                        
+        elif self.mode == 'keep':
+            scale = min(scale_w, scale_h)
+            boxes *= scale
+
+        elif self.mode == 'no keep':
+            boxes[..., [0, 2]] *= scale_w
+            boxes[..., [1, 3]] *= scale_h
+            
+        return boxes
     
     def rescale_boxes(self, boxes, original_shape):
-        'img1_shape, boxes, img0_shape'
+        '''
+        Convert boxes from preprocessed image size back to original size
+        '''
+        
         h, w = original_shape[:2]
         scale_w = self.size[0] / w
         scale_h = self.size[1] / h
@@ -56,13 +92,10 @@ class Resizer:
         elif self.mode == 'no keep':
             '''Not implement'''
             pass
-        else:
-            print('method %s not support yet'%self.mode)
-            assert False
 
         return boxes
 
-    def resize_keep_ar(self, image, boxes):
+    def resize_keep_ar(self, image):
         h, w, c = image.shape
         scale_w = self.size[0] / w
         scale_h = self.size[1] / h
@@ -70,27 +103,15 @@ class Resizer:
         h = int(h * scale)
         w = int(w * scale)
         padimg = np.zeros((self.size[0], self.size[1], c), image.dtype)
-        padimg[:h, :w] = cv2.resize(image, (w, h))
-        new_anns = []
-        for box in boxes:
-            box = np.array(box).astype(np.float32)
-            box *= scale
-            new_anns.append(box)
-        return padimg, new_anns
+        padimg[:h, :w] = image
+        return padimg
 
-    def resize_wo_keep_ar(self, image, boxes):
+    def resize_wo_keep_ar(self, image):
         h, w, c = image.shape
         resized = cv2.resize(image, self.size)
-        scale_h, scale_w = self.size[1]/h, self.size[0]/w
-        new_anns = []
-        for box in boxes:
-            xmin, ymin, xmax, ymax = box
-            xmin, xmax = xmin * scale_w, xmax * scale_w
-            ymin, ymax = ymin * scale_h, ymax * scale_h
-            new_anns.append([xmin, ymin, xmax, ymax])
-        return resized, new_anns
+        return resized
     
-    def letterbox(self, im, boxes, color=(114, 114, 114), stride=32):
+    def letterbox(self, im, color=(114, 114, 114), stride=32):
         ## auto = True, scaleup = False
         # Resize and pad image while meeting stride-multiple constraints
         shape = im.shape[:2]  # current shape [height, width]
@@ -108,17 +129,12 @@ class Resizer:
 
         dw /= 2  # divide padding into 2 sides
         dh /= 2
-        boxes = np.array(boxes).astype('float32')
         if shape[::-1] != new_unpad:  # resize
             im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
-            boxes[..., [0, 2]] *= new_unpad[0]/shape[1]
-            boxes[..., [1, 3]] *= new_unpad[1]/shape[0]
         top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
         left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
         im = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
-        boxes[..., [0, 2]] += dw
-        boxes[..., [1, 3]] += dh
-        return im, boxes.astype('int32')
+        return im
 
 def check_is_image(name:str):
     return name.endswith(('.jpg', '.png', '.jpeg'))

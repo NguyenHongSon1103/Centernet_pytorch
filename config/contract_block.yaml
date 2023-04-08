@@ -1,0 +1,44 @@
+
+nc : 2
+names : 
+  party: 0
+  partyA: 0
+  partyB: 0
+  bank : 1
+
+#----------------------- 
+# Model architecture One of ['tiny', 's', 'm', 'l', 'x']
+#-----------------------
+version: 'n'
+
+#-----------------------
+# Data path
+#-----------------------
+train: /data/sonnh8/Contract/new_contract_block_data/val/images
+# train: [/data/sonnh8/Contract/new_contract_block_data/train/images,
+#         /data/sonnh8/Contract/new_contract_block_data/train_fake/images,
+#         /data/sonnh8/Contract/new_contract_block_data/train_fake_2/images,
+#         /data/sonnh8/Contract/new_contract_block_data/augmented/images]
+
+val: /data/sonnh8/Contract/new_contract_block_data/val/images
+# test: /home/s/sonnh/polyp_data/test/images
+
+#-----------------------
+# Training configs
+#-----------------------
+gpu : '1'
+input_size : 640
+batch_size : 2
+epochs : 100
+optimizer :
+  type : Adam
+  base_lr : 0.001 #1e-3
+  end_lr : 0.00001 #1e-5
+  warmup_lr : 0.00002 #2e-5
+  warmup_steps : 10000
+
+max_boxes : 100
+save_dir : 'save_dir/contract_block'
+save_period: 5
+resume : False
+resume_checkpoint : ''

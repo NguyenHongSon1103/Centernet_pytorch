@@ -22,7 +22,7 @@ with open(args.config) as f:
 cfg['save_dir'] = os.path.abspath(cfg['save_dir'])
 os.makedirs(cfg['save_dir'], exist_ok=True)
 
-os.environ['CUDA_VISIBLE_DEVICES'] = str(cfg['gpu'])
+# os.environ['CUDA_VISIBLE_DEVICES'] = str(cfg['gpu'])
 ## Load data [Done]
 train_dataset = Generator(cfg, mode='train')
 val_dataset   = Generator(cfg, mode='val')
@@ -31,9 +31,11 @@ val_loader    = DataLoader(val_dataset, shuffle=False, batch_size=cfg['batch_siz
 
 if not os.path.exists(os.path.join(cfg['save_dir'], 'val_labels.json')):
     val_dataset.generate_coco_format(os.path.join(cfg['save_dir'], 'val_labels.json'))
+
 ## Load model
 model = Model(version=cfg['version'], nc=cfg['nc'], max_boxes=cfg['max_boxes'], is_training=True)
-device = torch.device('cuda:'+cfg['gpu']) if torch.cuda.is_available() else torch.device('cpu')
+# device = torch.device('cuda:'+cfg['gpu']) if torch.cuda.is_available() else torch.device('cpu')
+device = torch.device('cpu')
 model.to(device)
 
 # summary(model, input_size=(1, 3, cfg['input_size'], cfg['input_size']))## Get optimizer and loss

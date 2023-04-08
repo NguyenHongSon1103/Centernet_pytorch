@@ -64,8 +64,8 @@ class BaseTrainer:
 
         key_nums = len(self.loss_keys) + 1
         print('%s    '*key_nums%tuple(['Epoch']+self.loss_keys))
-
-        pbar = tqdm(enumerate(self.data_loader))
+        
+        pbar = tqdm(enumerate(self.data_loader), total=len(self.data_loader))
         for batch_idx, (data, target) in pbar:
             data = data.to(self.device).permute(0, 3, 1, 2)
             target = [tg.to(self.device) for tg in target]
@@ -79,7 +79,7 @@ class BaseTrainer:
             #Convert tensor to scalar    
             loss_dict = {key:loss_dict[key].item() for key in loss_dict}
 
-            pbar.set_description('%10d    '%epoch + '%10.4f    '*(key_nums-1)%tuple([loss_dict[key] for key in loss_dict]))
+            pbar.set_description('%d    '%epoch + '%10.4f    '*(key_nums-1)%tuple([loss_dict[key] for key in loss_dict]))
 
             #Update history loss:
             self._update_history_loss(loss_dict)
@@ -109,23 +109,26 @@ class BaseTrainer:
         metrics = {'mAP50':0, 'mAP50-95':0}
         all_predictions = []
         with torch.no_grad():
-            pbar = tqdm(enumerate(self.valid_data_loader), desc='%10s    '*2%('mAP50', 'mAP50-95'))
+            pbar = tqdm(enumerate(self.valid_data_loader),
+                        total=len(self.valid_data_loader),
+                        desc='%10s    '*2%('mAP50', 'mAP50-95'))
+            
             for batch_idx, (data, target, im_paths) in pbar:
                 data = data.to(self.device).permute(0, 3, 1, 2)
                 data, target = data.to(self.device), [tg.to(self.device) for tg in target]
 
                 output = self.model(data)
-                predictions = self.model.decoder(output).to('cpu').numpy()
+                predictions = self.model.decoder(output).cpu().numpy()
                 
                 for prediction, im_path in zip(predictions, im_paths):
                     all_predictions.append({'im_path':im_path, 'pred':prediction})
-            ## Phần này tính mAP trong này ##
+            ## Calculate overall mAP ##
             save_path = os.path.join(self.config['save_dir'], 'val_predictions.json')
             self.generate_coco_format_predict(all_predictions, save_path)
             stats = evaluate(os.path.join(self.config['save_dir'], 'val_labels.json'), save_path)
-
-            metrics['mAP50'] = np.mean([s[1] for s in stats]) if self.config['nc']>1 else stats[1]
-            metrics['mAP50-95'] = np.mean([s[0] for s in stats]) if self.config['nc']>1 else stats[1]
+            
+            metrics['mAP50'] = stats[1]
+            metrics['mAP50-95'] = stats[0]
             ## ----------------------------##
 
             print('%10.4f    '*2%tuple(metrics[key] for key in metrics))
@@ -178,7 +181,7 @@ class BaseTrainer:
         torch.save(state, filename)
         print("Saving checkpoint: {} ...".format(filename))
         if save_best:
-            best_path = str(self.checkpoint_dir / 'model_best.pth')
+            best_path = os.path.join(self.checkpoint_dir, 'model_best.pth')
             torch.save(state, best_path)
             print("Saving current best: model_best.pth ...")
 
@@ -221,6 +224,7 @@ class BaseTrainer:
             detection = item['pred']
             raw_boxes, scores, class_ids = detection[..., :4], detection[..., 4], detection[..., 5].astype('int32')
             im_w, im_h = Image.open(item['im_path']).size
+            raw_boxes = raw_boxes * 4
             boxes = self.resizer.rescale_boxes(raw_boxes, (im_h, im_w))
             name = item['im_path'].split('/')[-1]
             for box, score, class_id in zip(boxes, scores, class_ids):

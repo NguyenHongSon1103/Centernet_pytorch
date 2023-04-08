@@ -1,6 +1,9 @@
 import math
 import numpy as np
-from .utils import gaussian_radius, draw_gaussian, draw_gaussian_2, draw_msra_gaussian
+import sys
+import os
+sys.path.append(os.getcwd())
+from utils import gaussian_radius, draw_gaussian, draw_gaussian_2, draw_msra_gaussian
 
 class Assigner:
     def __init__(self, num_classes, input_size=(640, 640), stride=4, max_object=100):
