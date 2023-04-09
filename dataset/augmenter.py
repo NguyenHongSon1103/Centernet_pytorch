@@ -40,12 +40,12 @@ class MiscAugmenter:
     def __init__(self, keep_prob=0.3):
         self.p = keep_prob
         T = [
+            A.BBoxSafeRandomCrop(erosion_rate=0.2, p=0.2),
             A.Affine(scale={'x':(0.5, 1.5), 'y':(0.5, 1.5)}, keep_ratio=False,
-                    translate_percent={'x':(0.0, 0.1), 'y':(0.0, 0.1)},
-                    rotate=5, shear=None, p=0.2),
+                    translate_percent=None,
+                    rotate=(0, 5), shear=None, p=0.2),
             A.HorizontalFlip(p=0.2),
-            A.VerticalFlip(p=0.2),
-            A.BBoxSafeRandomCrop(p=0.2)
+            A.VerticalFlip(p=0.2)
         ]
         self.transform = A.Compose(T, bbox_params=A.BboxParams(format='pascal_voc'))
     

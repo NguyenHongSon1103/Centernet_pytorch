@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import cv2
@@ -12,7 +13,24 @@ from copy import deepcopy
 from utils import parse_xml, check_is_image, Resizer
 from tqdm import tqdm
 from PIL import Image
+import logging
 
+LOGGER = logging.getLogger()
+LOGGER.setLevel(logging.DEBUG)
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+LOGGER.addHandler(handler)
+
+def get_hash(paths):
+    # Returns a single hash value of a list of paths (files or dirs)
+    size = sum(os.path.getsize(p) for p in paths if os.path.exists(p))  # sizes
+    h = hashlib.sha256(str(size).encode())  # hash sizes
+    h.update(''.join(paths).encode())  # hash paths
+    return h.hexdigest()  # return hash
+    
 def load_data(img_dirs):
     '''
     Default: each set contains 2 folder: images and annotations
@@ -20,10 +38,11 @@ def load_data(img_dirs):
     if isinstance(img_dirs, str):
         img_dirs = [img_dirs]
 
+    label_dirs = [img_dir.replace('images', 'annotations') for img_dir in img_dirs]
+
     image_paths = []
     label_paths = []
-    for img_dir in img_dirs:
-        lb_dir = img_dir.replace('images', 'annotations')
+    for img_dir, lb_dir in zip(img_dirs, label_dirs):
         
         for name in os.listdir(img_dir):
             if not check_is_image(name):
@@ -31,20 +50,48 @@ def load_data(img_dirs):
             image_paths.append(os.path.join(img_dir,  name))
             label_paths.append(os.path.join(lb_dir,  '.'.join(name.split('.')[:-1])+'.xml'))
     
+    # Load from cache
+    cache_path = label_dirs[0] +'.cache'
+    
+    if os.path.exists(cache_path):
+        cache = np.load(cache_path, allow_pickle=True).item()  # load dict
+        LOGGER.info('Loading labels from cache ...' )
+        if cache['hash'] == get_hash(label_dirs + img_dirs):  # identical hash
+            nf, nm, ne, _ = cache['results']
+            data = cache['data']
+            LOGGER.info('Total: %d | Images: %d | Background: %d | Empty: %d'%(len(data), nf, nm, ne))
+            return data
+        else:
+            LOGGER.error('Cannot load from cache, switch to load from source paths')
+    # If cannot load from cache, load from folder
     print('Scanning: ')
-    background = 0
+    nm, nf, ne = 0, 0, 0  # number missing, found, empty
     data = []
     pbar = tqdm(enumerate(image_paths), total=len(image_paths))
     for i, fp in pbar:
         xp = label_paths[i]
-        if os.path.exists(xp):
-            boxes, class_names = parse_xml(xp)
-            data.append({'im_path':fp, 'boxes':boxes, 'class_names':class_names})
-        else:
-            background += 1
+        if not os.path.exists(xp):
+            nm += 1
+            continue
+        boxes, class_names = parse_xml(xp)
+        if len(boxes) == 0:
+            ne += 1
+            continue
+        data.append({'im_path':fp, 'boxes':boxes, 'class_names':class_names})
+        nf += 1
         
-        pbar.set_description(desc='Images: %d | Background: %d'%(len(data), background))
+        pbar.set_description(desc='Total: %d | Images: %d | Background: %d | Empty: %d'%(len(data), nf, nm, ne))
     
+    # Cache file: 
+    if nf == 0:
+        LOGGER.warning('WARNING ⚠️ No labels found')
+    x = {}
+    x['data'] = data
+    x['hash'] = get_hash(label_dirs + img_dirs)
+    x['results'] = nf, nm, ne, len(image_paths)
+    np.save(cache_path, x)  # save cache for next time
+    os.rename(cache_path+'.npy', cache_path) # remove .npy suffix
+    LOGGER.info(f'New cache created: {cache_path}')
     return data
 
 class Generator(Dataset):
@@ -91,9 +138,10 @@ class Generator(Dataset):
 
         ##Augmentation
         if self.mode == 'train':
-            item = self.visual_augmenter(item)
             item = self.misc_augmenter(item)
-    
+            item = self.visual_augmenter(item)
+        assert len(item['boxes']) > 0, d['im_path']
+            
         item['image'] = cv2.cvtColor(item['image'], cv2.COLOR_BGR2RGB)
         item['image'] = self.resizer.resize_image(item['image'])
         item['boxes'] = self.resizer.resize_boxes(item['boxes'], item['image'].shape[:2]) #640x640
