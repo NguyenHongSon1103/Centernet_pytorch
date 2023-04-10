@@ -7,7 +7,7 @@ import math
 import numpy as np
 import sys
 sys.path.append(os.getcwd())
-from .augmenter import VisualAugmenter, MiscAugmenter, AdvancedAugmenter
+from .augmenter import VisualAugmenter, SpatialAugmenter, AdvancedAugmenter
 from .assigner import Assigner
 from copy import deepcopy
 from utils import parse_xml, check_is_image, Resizer
@@ -118,37 +118,49 @@ class Generator(Dataset):
         self.assigner = Assigner(self.num_classes, self.input_size, self.stride, self.max_objects)
 
         ## New aumgenter
-        self.visual_augmenter = VisualAugmenter(keep_prob=0.5)
-        self.misc_augmenter = MiscAugmenter(keep_prob=0.5)
-        self.advanced_augmenter = AdvancedAugmenter(keep_prob=0.5)
+        self.visual_augmenter = VisualAugmenter(hparams['visual'])
+        self.misc_augmenter = SpatialAugmenter(hparams['spatial'])
+        # self.advanced_augmenter = AdvancedAugmenter(hparams['advanced'])
         
     def on_epoch_end(self):
         np.random.shuffle(self.data)
+    
+    def load_item(self, d):
+        image = cv2.imread(d['im_path'])
+        h, w = image.shape[:2]
+        boxes, class_names = d['boxes'], d['class_names']
+        boxes = np.array(boxes)
+        boxes[..., [0, 2]] = np.clip(boxes[..., [0, 2]], 0, w)
+        boxes[..., [1, 3]] = np.clip(boxes[..., [1, 3]], 0, h)
+        class_ids = np.array([self.mapper[name] for name in class_names])
+
+        item = {'image':image.copy(), 'boxes':boxes.copy(), 'class_ids':class_ids.copy()}
+        return item
 
     def __len__(self):
         return len(self.data)
     
     def __getitem__(self, idx):
         d = deepcopy(self.data[idx])
-        image = cv2.imread(d['im_path'])
-        boxes, class_names = d['boxes'], d['class_names']
-        class_ids = [self.mapper[name] for name in class_names]
-
-        item = {'image':image, 'boxes':boxes, 'class_ids':class_ids}
-
+        item = self.load_item(d)
+        
         ##Augmentation
         if self.mode == 'train':
-            item = self.misc_augmenter(item)
+            src_item = deepcopy(item)
+            src_item = self.misc_augmenter(src_item) 
+            #bug: Lost box after spatial transform, happen a few time
+            #still not know which transformation caused this
+            if len(src_item['boxes']) > 0:
+                item = src_item
             item = self.visual_augmenter(item)
-        assert len(item['boxes']) > 0, d['im_path']
-            
+        
         item['image'] = cv2.cvtColor(item['image'], cv2.COLOR_BGR2RGB)
         item['image'] = self.resizer.resize_image(item['image'])
-        item['boxes'] = self.resizer.resize_boxes(item['boxes'], item['image'].shape[:2]) #640x640
+        item['boxes'] = self.resizer.resize_boxes(item['boxes'], (h, w)) #640x640
         item['image'] = item['image'].astype('float32') / 255.0
-
+        
         hm, wh, reg, indices = self.assigner(item['boxes'], item['class_ids'])
-        if self.mode == 'val':
+        if self.mode != 'train':
             return item['image'], (hm, wh, reg, indices), d['im_path']
 
         return item['image'], (hm, wh, reg, indices)

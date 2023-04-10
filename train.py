@@ -26,8 +26,8 @@ os.makedirs(cfg['save_dir'], exist_ok=True)
 ## Load data [Done]
 train_dataset = Generator(cfg, mode='train')
 val_dataset   = Generator(cfg, mode='val')
-train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=cfg['batch_size'], num_workers=0)
-val_loader    = DataLoader(val_dataset, shuffle=False, batch_size=cfg['batch_size'], num_workers=0)
+train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=cfg['batch_size'], num_workers=6)
+val_loader    = DataLoader(val_dataset, shuffle=False, batch_size=cfg['batch_size'], num_workers=6)
 
 if not os.path.exists(os.path.join(cfg['save_dir'], 'val_labels.json')):
     val_dataset.generate_coco_format(os.path.join(cfg['save_dir'], 'val_labels.json'))
@@ -46,7 +46,8 @@ scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
 
 loss_fn = Loss()
 
-trainer = BaseTrainer(model, loss_fn, optimizer, device, train_loader, val_loader, scheduler, cfg['epochs'], cfg)
+trainer = BaseTrainer(model, loss_fn, optimizer, device, train_loader, val_loader, test_data_loader=None,
+                lr_scheduler=scheduler, config=cfg)
 
 if __name__ == '__main__':
     trainer.train()

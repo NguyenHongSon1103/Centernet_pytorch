@@ -1,11 +1,3 @@
-
-nc : 2
-names : 
-  party: 0
-  partyA: 0
-  partyB: 0
-  bank : 1
-
 #----------------------- 
 # Model architecture One of ['tiny', 's', 'm', 'l', 'x']
 #-----------------------
@@ -14,25 +6,31 @@ version: 'n'
 #-----------------------
 # Data path
 #-----------------------
-train: /data/sonnh8/Contract/new_contract_block_data/val/images
-# train: [/data/sonnh8/Contract/new_contract_block_data/train/images,
-#         /data/sonnh8/Contract/new_contract_block_data/train_fake/images,
-#         /data/sonnh8/Contract/new_contract_block_data/train_fake_2/images,
-#         /data/sonnh8/Contract/new_contract_block_data/augmented/images]
+
+nc : 2
+names : 
+  party: 0
+  partyA: 0
+  partyB: 0
+  bank : 1
+
+train: [/data/sonnh8/Contract/new_contract_block_data/train/images,
+        /data/sonnh8/Contract/new_contract_block_data/train_fake/images,
+        /data/sonnh8/Contract/new_contract_block_data/train_fake_2/images,
+        /data/sonnh8/Contract/new_contract_block_data/augmented/images]
 
 val: /data/sonnh8/Contract/new_contract_block_data/val/images
-# test: /home/s/sonnh/polyp_data/test/images
-
+test: /data/sonnh8/Contract/new_contract_block_data/val/images
 #-----------------------
 # Training configs
 #-----------------------
 gpu : '1'
 input_size : 640
-batch_size : 2
+batch_size : 18
 epochs : 100
 optimizer :
   type : Adam
-  base_lr : 0.001 #1e-3
+  base_lr : 0.001 #5e-3
   end_lr : 0.00001 #1e-5
   warmup_lr : 0.00002 #2e-5
   warmup_steps : 10000
@@ -42,3 +40,31 @@ save_dir : 'save_dir/contract_block'
 save_period: 5
 resume : False
 resume_checkpoint : ''
+
+#-----------------------
+# Augmentation config
+#-----------------------
+         
+spatial: 
+    keep: 0.5 # prob for keep original images
+    crop: 0.0 # prob for BBoxSafeRandomCrop
+    scale_x: [0.5, 1.5] #ratio for x axis 
+    scale_y: [0.5, 1.5] #ratio for y axis
+    keep_ratio: False #keep original ratio or not
+    translate_x: 0 # ratio for x axis
+    translate_y: 0 # ratio for y axis
+    rotate: 1 # +/- degree 
+    shear: 0 # +/- degree
+    hflip: 0.0 # prob for horizontal flip
+    vflip: 0.0 # prob for vertical flip
+
+visual: # all prob
+    keep: 0.5
+    color_jiiter: 0.2
+    blur: 0.1
+    image_compression: 0.1
+    gray: 0.0
+    
+advanced: #all prob
+    keep: 0.5
+    mosaic: 0.0

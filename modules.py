@@ -89,7 +89,8 @@ class ImplicitA(nn.Module):
         self.channel = channel
         self.mean = mean
         self.std = std
-        self.implicit = nn.parameter.Parameter(torch.zeros(1, channel, 1, 1))
+        self.implicit = nn.Parameter(torch.zeros(1, channel, 1, 1))
+        nn.init.normal_(self.implicit, mean=self.mean, std=self.std)
 
     def forward(self, x):
         return self.implicit + x
@@ -102,6 +103,7 @@ class ImplicitM(nn.Module):
         self.mean = mean
         self.std = std
         self.implicit = nn.Parameter(torch.zeros(1, channel, 1, 1))
+        nn.init.normal_(self.implicit, mean=self.mean, std=self.std)
 
     def forward(self, x):
         return self.implicit * x
@@ -166,7 +168,7 @@ class IHead(nn.Module):
             self.ia,
             Conv(ch[0], ch[0], 3, 1),
             self.im,
-            nn.Conv2d(ch[0], 2, 1),
+            nn.Conv2d(ch[0], 2, 1, bias=False),
             nn.ReLU()
         )
 
@@ -175,7 +177,7 @@ class IHead(nn.Module):
             self.ia,
             Conv(ch[0], ch[0], 3, 1),
             self.im,
-            nn.Conv2d(ch[0], 2, 1),
+            nn.Conv2d(ch[0], 2, 1, bias=False),
             nn.Sigmoid()
         )
 
@@ -191,13 +193,27 @@ class IHead(nn.Module):
         return out_hm, out_wh, out_reg
     
     def _init_weights(self):
-        for m in self.hm_out.modules():
+        #For all module inside head
+        for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight)
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
                 if m.bias is not None:
-                    nn.init.constant_(m.bias, -4.6)
-                
+                    nn.init.constant_(m.bias, 0)
 
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+            elif isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+        #For only last conv2d in self.hm_out modules            
+        m = self.hm_out[-2]
+        if isinstance(m, nn.Conv2d):
+            if m.bias is not None:
+                nn.init.constant_(m.bias, -4.6)  
+                
 def _sigmoid(x):
     y = torch.clamp(x.sigmoid_(), min=1e-4, max=1-1e-4)
     return y

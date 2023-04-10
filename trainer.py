@@ -8,21 +8,22 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 from tqdm import tqdm
 from PIL import Image
-from eval import evaluate
+from eval import evaluate, evaluate_all
 
 class BaseTrainer:
     def __init__(self,  model, loss_fn, optimizer, device,
-                data_loader, valid_data_loader=None,
-                lr_scheduler=None, epochs=None, config=None):
+                data_loader, valid_data_loader=None, test_data_loader=None,
+                lr_scheduler=None, config=None):
 
         self.model = model
         self.loss_fn = loss_fn
         self.optimizer = optimizer
         self.device = device
         self.data_loader = data_loader
-        self.epochs = epochs
+        self.epochs = config['epochs']
         self.valid_data_loader = valid_data_loader
         self.do_validation = self.valid_data_loader is not None
+        self.test_data_loader = test_data_loader
         self.lr_scheduler = lr_scheduler
         self.log_step = int(np.sqrt(data_loader.batch_size))
         self.config = config
@@ -43,10 +44,6 @@ class BaseTrainer:
         self.val_metrics = {'mAP50':[], 'mAP50-95':[]}
         self.resizer = self.data_loader.dataset.resizer
     
-    def _update_history_loss(self, loss_dict):
-        for key in self.loss_keys:
-            self.history_loss[key].append(loss_dict[key])
-    
     def _write_tensorboard(self, loss_dict, global_step):
         for key in loss_dict:
             self.writer.add_scalar(key, loss_dict[key], global_step=global_step)        
@@ -60,9 +57,10 @@ class BaseTrainer:
         """
         self.model.train()
         
-        self.history_loss = {key:[] for key in self.loss_keys}
+        history_loss = {key:[] for key in self.loss_keys}
 
         key_nums = len(self.loss_keys) + 1
+        print('='10)
         print('%s    '*key_nums%tuple(['Epoch']+self.loss_keys))
         
         pbar = tqdm(enumerate(self.data_loader), total=len(self.data_loader))
@@ -82,21 +80,21 @@ class BaseTrainer:
             pbar.set_description('%d    '%epoch + '%10.4f    '*(key_nums-1)%tuple([loss_dict[key] for key in loss_dict]))
 
             #Update history loss:
-            self._update_history_loss(loss_dict)
+            for key in self.loss_keys:
+                history_loss[key].append(loss_dict[key])
             
             #Write tensorboard
             if batch_idx % self.log_step == 0:
                 global_step = (epoch - 1) * self.epochs + batch_idx
                 self._write_tensorboard(loss_dict, global_step)
 
-        if self.do_validation:
-            self.valid_data_loader.shuffle=False
-            metrics = self._valid_epoch(epoch)
-            for key in metrics:
-                self.val_metrics[key].append(metrics[key])
 
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()
+        
+        #Get mean history loss for return
+        history_loss_mean = {key:np.mean(history_loss[key]) for key in self.loss_keys}
+        return history_loss_mean
 
     def _valid_epoch(self, epoch):
         """
@@ -124,8 +122,9 @@ class BaseTrainer:
                     all_predictions.append({'im_path':im_path, 'pred':prediction})
             ## Calculate overall mAP ##
             save_path = os.path.join(self.config['save_dir'], 'val_predictions.json')
+            lb_path = os.path.join(self.config['save_dir'], 'val_labels.json')
             self.generate_coco_format_predict(all_predictions, save_path)
-            stats = evaluate(os.path.join(self.config['save_dir'], 'val_labels.json'), save_path)
+            stats = evaluate(lb_path, save_path)
             
             metrics['mAP50'] = stats[1]
             metrics['mAP50-95'] = stats[0]
@@ -143,22 +142,28 @@ class BaseTrainer:
         """
         best_mAP50_95 = 0
         for epoch in range(self.start_epoch, self.epochs + 1):
-            self._train_epoch(epoch)
+            #Train epoch
+            history_loss_mean = self._train_epoch(epoch)
+            #Eval epoch
+            if self.do_validation:
+                self.valid_data_loader.shuffle=False
+                metrics = self._valid_epoch(epoch)
+                for key in metrics:
+                    self.val_metrics[key].append(metrics[key])
 
             # save logged informations into log dict
-            log = []
-            for key in self.history_loss:
-                log.append({key:self.history_loss[key]})
+            logs = []
+            logs.append({key:round(history_loss_mean[key], 4) for key in history_loss_mean})
             
             for key in self.val_metrics:
-                log[-1][key] = self.val_metrics[key][-1]
-
+                logs[-1][key] = self.val_metrics[key][-1]
+            print(logs[-1])
             
             #  save best checkpoint as model_best
             if epoch % self.save_period == 0:
-                if log[-1]['mAP50-95'] > best_mAP50_95: 
+                if logs[-1]['mAP50-95'] > best_mAP50_95: 
                     best=True
-                    best_mAP50_95 = log[-1]['mAP50-95']
+                    best_mAP50_95 = logs[-1]['mAP50-95']
                 else:
                     best=False
                 self._save_checkpoint(epoch, save_best=best)
@@ -167,7 +172,6 @@ class BaseTrainer:
         """
         Saving checkpoints
         :param epoch: current epoch number
-        :param log: logging information of the epoch
         :param save_best: if True, rename the saved checkpoint to 'model_best.pth'
         """
         arch = type(self.model).__name__
@@ -246,5 +250,38 @@ class BaseTrainer:
             return
 
         # write output
-        json.dump(results, open(save_path, 'w'))
-        print(f"Prediction to COCO format finished. Resutls saved in {save_path}")
+        with open(save_path, 'w') as f:
+            json.dump(results, f)
+        # print(f"Prediction to COCO format finished. Resutls saved in {save_path}")
+    
+    def test(self):
+        """
+        Validate after training an epoch
+
+        :return: A log that contains information about test
+        """
+        self.model.eval()
+        metrics = {'mAP50':0, 'mAP50-95':0}
+        all_predictions = []
+        with torch.no_grad():
+            pbar = tqdm(enumerate(self.test_data_loader),
+                        total=len(self.test_data_loader),
+                        desc='%10s    '*2%('mAP50', 'mAP50-95'))
+
+            for batch_idx, (data, _, im_paths) in pbar:
+                data = data.to(self.device).permute(0, 3, 1, 2)
+                
+                output = self.model(data)
+                predictions = self.model.decoder(output)[0].cpu().numpy() #Nx100x6
+                boxes, scores, class_ids = predictions[:, :4], predictions[:, 4], predictions[:, 5]
+
+
+                for prediction, im_path in zip(predictions, im_paths):
+                    all_predictions.append({'im_path':im_path, 'pred':prediction})
+            ## Calculate overall mAP ##
+            save_path = os.path.join(self.config['save_dir'], 'test_predictions.json')
+            lb_path = os.path.join(self.config['save_dir'], 'test_labels.json')
+            self.generate_coco_format_predict(all_predictions, save_path)
+            stats = evaluate_all(lb_path, save_path)
+
+        return stats

@@ -4,12 +4,12 @@ import albumentations as A
 import cv2
 import numpy as np
 import os
-
+    
 class VisualAugmenter:
-    def __init__(self, keep_prob=0.3):
-        self.p = keep_prob
+    def __init__(self, visual_cfg):
+        self.p = visual_cfg['keep']
         T = [
-            A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2, p=0.2),
+            A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2, p=visual_cfg['color_jiiter']),
             A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.2),
             A.RandomGamma(gamma_limit=(80, 120), p=0.2),
             A.CLAHE(p=0.2),
@@ -17,9 +17,9 @@ class VisualAugmenter:
                 A.Blur(p=0.3),
                 A.GaussianBlur(p=0.4),
                 A.MedianBlur(p=0.3)
-            ], p=0.1),
-            A.ImageCompression(quality_lower=75, quality_upper=100, p=0.1),
-            A.ToGray(p=0.1)
+            ], p=visual_cfg['blur']),
+            A.ImageCompression(quality_lower=75, quality_upper=100, p=visual_cfg['image_compression']),
+            A.ToGray(p=visual_cfg['gray'])
         ]
         self.transform = A.Compose(T, p=1.0)
     
@@ -35,17 +35,26 @@ class VisualAugmenter:
         augmented_data = deepcopy(data)
         augmented_data['image'] = res
         return augmented_data
-
-class MiscAugmenter:
-    def __init__(self, keep_prob=0.3):
-        self.p = keep_prob
+    
+class SpatialAugmenter:
+    def __init__(self, spatial_config):
+        '''
+        Spatial augmentation
+        Note: use rotate in affine cause lost box, use safe rotate instead
+        '''
+        self.p = spatial_config['keep']
+        
         T = [
-            A.BBoxSafeRandomCrop(erosion_rate=0.2, p=0.2),
-            A.Affine(scale={'x':(0.5, 1.5), 'y':(0.5, 1.5)}, keep_ratio=False,
-                    translate_percent=None,
-                    rotate=(0, 5), shear=None, p=0.2),
-            A.HorizontalFlip(p=0.2),
-            A.VerticalFlip(p=0.2)
+            A.BBoxSafeRandomCrop(erosion_rate=0.2, p=spatial_config['crop']),
+            A.Affine(scale={'x':spatial_config['scale_x'], 'y':spatial_config['scale_y']},
+                    keep_ratio=spatial_config['keep_ratio'],
+                    translate_percent={'x':spatial_config['translate_x'], 'y':spatial_config['translate_y']},
+                    rotate=None,
+                    shear=spatial_config['shear'], p=0.2),
+            A.SafeRotate (limit=spatial_config['rotate'], border_mode=cv2.BORDER_CONSTANT,
+                          value=0, p=0.2),
+            A.HorizontalFlip(p=spatial_config['hflip']),
+            A.VerticalFlip(p=spatial_config['vflip'])
         ]
         self.transform = A.Compose(T, bbox_params=A.BboxParams(format='pascal_voc'))
     
@@ -128,35 +137,11 @@ def rand(a=0, b=1):
     return np.random.rand()*(b-a) + a
 
 class AdvancedAugmenter:
-    def __init__(self, keep_prob=0.7, target_size=(640, 640)):
-        self.p = keep_prob
+    def __init__(self, dataset, advanced_config, target_size=(640, 640)):
+        self.p = advanced_config['keep'] #all prob
+        self.mosaic_prob = advanced_config['mosaic']
         self.target_size= target_size
-
-    def mosaic_augmenter(self, list_images, list_boxes):
-        '''
-        list_images: 4 images
-        list_boxes : 4 coressponding boxes, each box -> (x1, y1, x2, y2, c)
-        target_size: w, h
-        '''
-        data = [resize(image, boxes, self.target_size) for image, boxes in zip(list_images, list_boxes)]
-        images = [d[0] for d in data]
-        box_datas = [d[1] for d in data]
-        w, h = self.target_size
-        min_offset_x = rand(0.3, 0.7)
-        min_offset_y = rand(0.3, 0.7)
-        
-        cutx = int(w * min_offset_x)
-        cuty = int(h * min_offset_y)
-
-        new_image = np.zeros((w, h, 3))
-        new_image[:cuty, :cutx, :] = images[0][:cuty, :cutx, :]
-        new_image[cuty:, :cutx, :] = images[1][cuty:, :cutx, :]
-        new_image[cuty:, cutx:, :] = images[2][cuty:, cutx:, :]
-        new_image[:cuty, cutx:, :] = images[3][:cuty, cutx:, :]
-
-        new_image = np.array(new_image, np.uint8)
-        new_boxes = merge_bboxes(box_datas, cutx, cuty)
-        return new_image, new_boxes
+        self.dataset = dataset #list
     
     def mosaic_v2(self, list_images, list_boxes):
         w, h = self.target_size
@@ -211,13 +196,20 @@ class AdvancedAugmenter:
 
         return output_img, new_anno
 
-    def __call__(self, list_data):
+    def __call__(self, item):
         '''
-        list_data: list of 4 dictionari with {'image': image, 'boxes': boxes, 'class_ids':class_ids}
+        item: a dictionari with {'image': image, 'boxes': boxes, 'class_ids':class_ids}
         '''
         ## Keep self.keep_prob original image
         if np.random.random() < self.p:
-            return list_data[-1]
+            return item
+        
+        #Sample 3 more data
+        list_data = [item]
+        samples = np.random.choice(self.dataset.data, 3)
+        for sample in samples:
+            list_data.append(self.dataset.load_item(sample))
+            
         list_images, list_boxes = [], []
         for data in list_data:
             list_images.append(data['image'])
