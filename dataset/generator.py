@@ -10,16 +10,16 @@ sys.path.append(os.getcwd())
 from .augmenter import VisualAugmenter, SpatialAugmenter, AdvancedAugmenter
 from .assigner import Assigner
 from copy import deepcopy
-from utils import parse_xml, check_is_image, Resizer
+from utils import parse_xml, check_is_image, Resizer, colorstr
 from tqdm import tqdm
 from PIL import Image
 import logging
 
 LOGGER = logging.getLogger()
-LOGGER.setLevel(logging.DEBUG)
+LOGGER.setLevel(logging.INFO)
 
 handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.DEBUG)
+handler.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 LOGGER.addHandler(handler)
@@ -31,7 +31,7 @@ def get_hash(paths):
     h.update(''.join(paths).encode())  # hash paths
     return h.hexdigest()  # return hash
     
-def load_data(img_dirs):
+def load_data(img_dirs, mode='train'):
     '''
     Default: each set contains 2 folder: images and annotations
     '''
@@ -50,6 +50,7 @@ def load_data(img_dirs):
             image_paths.append(os.path.join(img_dir,  name))
             label_paths.append(os.path.join(lb_dir,  '.'.join(name.split('.')[:-1])+'.xml'))
     
+    LOGGER.info(colorstr('blue', mode.upper()))
     # Load from cache
     cache_path = label_dirs[0] +'.cache'
     
@@ -62,9 +63,8 @@ def load_data(img_dirs):
             LOGGER.info('Total: %d | Images: %d | Background: %d | Empty: %d'%(len(data), nf, nm, ne))
             return data
         else:
-            LOGGER.error('Cannot load from cache, switch to load from source paths')
+            LOGGER.error('Cannot load from cache, try to load from source paths')
     # If cannot load from cache, load from folder
-    print('Scanning: ')
     nm, nf, ne = 0, 0, 0  # number missing, found, empty
     data = []
     pbar = tqdm(enumerate(image_paths), total=len(image_paths))
@@ -114,13 +114,13 @@ class Generator(Dataset):
         self.mode = mode
         self.mapper = hparams['names']
 
-        self.data = load_data(self.img_dirs)
+        self.data = load_data(self.img_dirs, self.mode)
         self.assigner = Assigner(self.num_classes, self.input_size, self.stride, self.max_objects)
 
         ## New aumgenter
         self.visual_augmenter = VisualAugmenter(hparams['visual'])
         self.misc_augmenter = SpatialAugmenter(hparams['spatial'])
-        # self.advanced_augmenter = AdvancedAugmenter(hparams['advanced'])
+        self.advanced_augmenter = AdvancedAugmenter(self, hparams['advanced'])
         
     def on_epoch_end(self):
         np.random.shuffle(self.data)
@@ -143,9 +143,10 @@ class Generator(Dataset):
     def __getitem__(self, idx):
         d = deepcopy(self.data[idx])
         item = self.load_item(d)
-        
+        h, w = item['image'].shape[:2]
         ##Augmentation
         if self.mode == 'train':
+            item = self.advanced_augmenter(item)
             src_item = deepcopy(item)
             src_item = self.misc_augmenter(src_item) 
             #bug: Lost box after spatial transform, happen a few time
@@ -153,7 +154,8 @@ class Generator(Dataset):
             if len(src_item['boxes']) > 0:
                 item = src_item
             item = self.visual_augmenter(item)
-        
+            
+            
         item['image'] = cv2.cvtColor(item['image'], cv2.COLOR_BGR2RGB)
         item['image'] = self.resizer.resize_image(item['image'])
         item['boxes'] = self.resizer.resize_boxes(item['boxes'], (h, w)) #640x640

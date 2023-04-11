@@ -14,10 +14,10 @@ names :
   partyB: 0
   bank : 1
 
-train: [/data/sonnh8/Contract/new_contract_block_data/train/images,
-        /data/sonnh8/Contract/new_contract_block_data/train_fake/images,
-        /data/sonnh8/Contract/new_contract_block_data/train_fake_2/images,
-        /data/sonnh8/Contract/new_contract_block_data/augmented/images]
+train: [/data/sonnh8/Contract/new_contract_block_data/train/images]
+        # /data/sonnh8/Contract/new_contract_block_data/train_fake/images,
+        # /data/sonnh8/Contract/new_contract_block_data/train_fake_2/images,
+        # /data/sonnh8/Contract/new_contract_block_data/augmented/images]
 
 val: /data/sonnh8/Contract/new_contract_block_data/val/images
 test: /data/sonnh8/Contract/new_contract_block_data/val/images
@@ -36,7 +36,7 @@ optimizer :
   warmup_steps : 10000
 
 max_boxes : 100
-save_dir : 'save_dir/contract_block'
+save_dir : 'save_dir/test_1'
 save_period: 5
 resume : False
 resume_checkpoint : ''

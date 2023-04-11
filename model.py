@@ -63,6 +63,29 @@ def parse_model(d, ch, version='n'):  # model_dict, input_channels(3)
         ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
 
+def fuse_conv_and_bn(conv, bn):
+    # Fuse Conv2d() and BatchNorm2d() layers https://tehnokv.com/posts/fusing-batchnorm-and-conv/
+    fusedconv = nn.Conv2d(conv.in_channels,
+                          conv.out_channels,
+                          kernel_size=conv.kernel_size,
+                          stride=conv.stride,
+                          padding=conv.padding,
+                          dilation=conv.dilation,
+                          groups=conv.groups,
+                          bias=True).requires_grad_(False).to(conv.weight.device)
+
+    # Prepare filters
+    w_conv = conv.weight.clone().view(conv.out_channels, -1)
+    w_bn = torch.diag(bn.weight.div(torch.sqrt(bn.eps + bn.running_var)))
+    fusedconv.weight.copy_(torch.mm(w_bn, w_conv).view(fusedconv.weight.shape))
+
+    # Prepare spatial bias
+    b_conv = torch.zeros(conv.weight.size(0), device=conv.weight.device) if conv.bias is None else conv.bias
+    b_bn = bn.bias - bn.weight.mul(bn.running_mean).div(torch.sqrt(bn.running_var + bn.eps))
+    fusedconv.bias.copy_(torch.mm(w_bn, b_conv.reshape(-1, 1)).reshape(-1) + b_bn)
+
+    return fusedconv
+
 class Neck(nn.Module):
     def __init__(self, ch, repeat) -> None:
         super().__init__()
@@ -104,11 +127,11 @@ class Model(nn.Module):
         repeat = [max(round(i*gd), 1) for i in [3, 6]]
 
         #back bone
-        with open('yolov8n.yaml') as f:
+        with open('v8_pretrained/yolov8.yaml') as f:
             d = yaml.safe_load(f)
         self.backbone, _ = parse_model(d, 3, version)
         try: 
-            v8_pretrained = '/data/sonnh8/yolov8/pretrained_weights/yolov8%s.pt'%version
+            v8_pretrained = 'v8_pretrained/yolov8%s.pt'%version
             self.backbone.load_state_dict(torch.load(v8_pretrained), strict=False)
             print('Load successfully yolov8 backbone weights !')
         except:
@@ -150,4 +173,30 @@ class Model(nn.Module):
             return detections
         return out
 
+    def fuse(self, verbose=True):
+        """
+        Fuse the `Conv2d()` and `BatchNorm2d()` layers of the model into a single layer, in order to improve the
+        computation efficiency.
+        Returns:
+            (nn.Module): The fused model is returned.
+        """
+        if not self.is_fused():
+            for m in self.modules():
+                if isinstance(m, Conv) and hasattr(m, 'bn'):
+                    m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
+                    delattr(m, 'bn')  # remove batchnorm
+                    m.forward = m.forward_fuse  # update forward
+            # self.info(verbose=verbose)
 
+        return self
+    
+    def is_fused(self, thresh=10):
+        """
+        Check if the model has less than a certain threshold of BatchNorm layers.
+        Args:
+            thresh (int, optional): The threshold number of BatchNorm layers. Default is 10.
+        Returns:
+            (bool): True if the number of BatchNorm layers in the model is less than the threshold, False otherwise.
+        """
+        bn = tuple(v for k, v in nn.__dict__.items() if 'Norm' in k)  # normalization layers, i.e. BatchNorm2d()
+        return sum(isinstance(v, bn) for v in self.modules()) < thresh  # True if < 'thresh' BatchNorm layers in model
