@@ -60,7 +60,7 @@ class BaseTrainer:
         history_loss = {key:[] for key in self.loss_keys}
 
         key_nums = len(self.loss_keys) + 1
-        print('='10)
+        print('='*10)
         print('%s    '*key_nums%tuple(['Epoch']+self.loss_keys))
         
         pbar = tqdm(enumerate(self.data_loader), total=len(self.data_loader))

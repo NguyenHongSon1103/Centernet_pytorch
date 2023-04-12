@@ -16,10 +16,10 @@ from PIL import Image
 import logging
 
 LOGGER = logging.getLogger()
-LOGGER.setLevel(logging.DEBUG)
+LOGGER.setLevel(logging.INFO)
 
 handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.DEBUG)
+handler.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 LOGGER.addHandler(handler)
@@ -143,7 +143,7 @@ class Generator(Dataset):
     def __getitem__(self, idx):
         d = deepcopy(self.data[idx])
         item = self.load_item(d)
-        
+        h, w = item['image'].shape[:2]
         ##Augmentation
         if self.mode == 'train':
             src_item = deepcopy(item)
