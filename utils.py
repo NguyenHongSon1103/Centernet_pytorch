@@ -6,6 +6,7 @@ import sys
 import cv2
 import numpy as np
 import os
+import pandas as pd
 
 class HiddenPrints:
     def __enter__(self):
@@ -227,7 +228,6 @@ def draw_gaussian_2(heatmap, center, radius, k=1):
     
     masked_heatmap = heatmap[y - top:y + bottom, x - left:x + right]
     masked_gaussian = gaussian[radius - top:radius + bottom, radius - left:radius + right]
-#     print(heatmap.shape, masked_heatmap.shape, masked_gaussian.shape)
     if min(masked_gaussian.shape) > 0 and min(masked_heatmap.shape) > 0:  # TODO debug
         heatmap[y - top:y + bottom, x - left:x + right] = np.maximum(masked_heatmap, masked_gaussian * k)
 
@@ -276,6 +276,48 @@ def gaussian_radius(det_size, min_overlap=0.7):
     sq3 = np.sqrt(b3 ** 2 - 4 * a3 * c3)
     r3 = (b3 + sq3) / 2
     return max(0, min(r1, r2, r3))
+
+
+def emojis(string=''):
+    # Return platform-dependent emoji-safe version of string
+    return string.encode().decode('ascii', 'ignore') if WINDOWS else string
+
+
+def colorstr(*input):
+    # Colors a string https://en.wikipedia.org/wiki/ANSI_escape_code, i.e.  colorstr('blue', 'hello world')
+    *args, string = input if len(input) > 1 else ('blue', 'bold', input[0])  # color arguments, string
+    colors = {
+        'black': '\033[30m',  # basic colors
+        'red': '\033[31m',
+        'green': '\033[32m',
+        'yellow': '\033[33m',
+        'blue': '\033[34m',
+        'magenta': '\033[35m',
+        'cyan': '\033[36m',
+        'white': '\033[37m',
+        'bright_black': '\033[90m',  # bright colors
+        'bright_red': '\033[91m',
+        'bright_green': '\033[92m',
+        'bright_yellow': '\033[93m',
+        'bright_blue': '\033[94m',
+        'bright_magenta': '\033[95m',
+        'bright_cyan': '\033[96m',
+        'bright_white': '\033[97m',
+        'end': '\033[0m',  # misc
+        'bold': '\033[1m',
+        'underline': '\033[4m'}
+    return ''.join(colors[x] for x in args) + f'{string}' + colors['end']
+
+def save_csv(info, save_dir, header=True):
+    assert isinstance(info, dict), "Save only dictionary"
+    df = pd.DataFrame(info, index=[0])
+    df.to_csv(os.path.join(save_dir, 'results.csv'), header=header,
+              index=False, index_label=False, mode='a+')
+
+# def save_image(item, path):
+#     image = item['images'].copy()
+#     boxes = item['boxes'].copy()
+#     class_ids =  item['
 
 if __name__ == '__main__':
     gaussian2D((3, 3))

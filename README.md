@@ -2,9 +2,11 @@
 
 TODO LIST:
 
-- Fix bug in augmenter: sometime boxes has lost
-- Validation results wrong (fixed, reason: Not init for implitcit layer -> model cannot learn)
+- Fix bug in augmenter: sometime boxes has lost (workaround: if lost -> cancel augment) 
+- Validation results wrong ([DONE], reason: Not init for implitcit layer -> model cannot learn)
 - Add Mosaic augmentation
+- Add visualize some image while training
+- Save result each epoch to csv [DONE]
 
 EXPERIMENTS DO:
 - Get results on PolypsSet 

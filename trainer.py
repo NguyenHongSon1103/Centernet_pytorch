@@ -9,6 +9,7 @@ import os
 from tqdm import tqdm
 from PIL import Image
 from eval import evaluate, evaluate_all
+from utils import save_csv
 
 class BaseTrainer:
     def __init__(self,  model, loss_fn, optimizer, device,
@@ -59,9 +60,9 @@ class BaseTrainer:
         
         history_loss = {key:[] for key in self.loss_keys}
 
-        key_nums = len(self.loss_keys) + 1
+        key_nums = len(self.loss_keys) + 2
         print('='*10)
-        print('%s    '*key_nums%tuple(['Epoch']+self.loss_keys))
+        print('%s    '*key_nums%tuple(['Epoch', 'lr']+self.loss_keys))
         
         pbar = tqdm(enumerate(self.data_loader), total=len(self.data_loader))
         for batch_idx, (data, target) in pbar:
@@ -77,7 +78,8 @@ class BaseTrainer:
             #Convert tensor to scalar    
             loss_dict = {key:loss_dict[key].item() for key in loss_dict}
 
-            pbar.set_description('%d    '%epoch + '%10.4f    '*(key_nums-1)%tuple([loss_dict[key] for key in loss_dict]))
+            pbar.set_description('%d    '%epoch + '%10.4f'%self.optimizer.param_groups[0]['lr'] + \
+                                 '%10.4f    '*(key_nums-2)%tuple([loss_dict[key] for key in loss_dict]))
 
             #Update history loss:
             for key in self.loss_keys:
@@ -151,24 +153,28 @@ class BaseTrainer:
                 for key in metrics:
                     self.val_metrics[key].append(metrics[key])
 
-            # save logged informations into log dict
+            ## save logged informations into log dict and to csv ##
             logs = []
             logs.append({key:round(history_loss_mean[key], 4) for key in history_loss_mean})
             
             for key in self.val_metrics:
-                logs[-1][key] = self.val_metrics[key][-1]
-            print(logs[-1])
+                logs[-1][key] = round(self.val_metrics[key][-1], 3)
+            logs[-1]['lr'] = float(self.optimizer.param_groups[0]['lr'])
+            save_csv(logs[-1], self.config['save_dir'], header=epoch==1)
+            ## End save logged ##
             
-            #  save best checkpoint as model_best
+            ## Save checkpoint ##
+            if logs[-1]['mAP50-95'] > best_mAP50_95: 
+                best_mAP50_95 = logs[-1]['mAP50-95']
+                self._save_checkpoint(epoch, save_best=True, save_last=True)
+            else:
+                self._save_checkpoint(epoch, save_best=False, save_last=True)
+            
             if epoch % self.save_period == 0:
-                if logs[-1]['mAP50-95'] > best_mAP50_95: 
-                    best=True
-                    best_mAP50_95 = logs[-1]['mAP50-95']
-                else:
-                    best=False
-                self._save_checkpoint(epoch, save_best=best)
+                self._save_checkpoint(epoch, save_best=False, save_last=False)
+            ## END SAVE CHECKPOINT ##
 
-    def _save_checkpoint(self, epoch, save_best=False):
+    def _save_checkpoint(self, epoch, save_best=False, save_last=True):
         """
         Saving checkpoints
         :param epoch: current epoch number
@@ -181,14 +187,20 @@ class BaseTrainer:
             'state_dict': self.model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
         }
-        filename = os.path.join(self.checkpoint_dir, 'checkpoint-epoch{}.pth'.format(epoch))
-        torch.save(state, filename)
-        print("Saving checkpoint: {} ...".format(filename))
         if save_best:
-            best_path = os.path.join(self.checkpoint_dir, 'model_best.pth')
+            best_path = os.path.join(self.checkpoint_dir, 'best.pt')
             torch.save(state, best_path)
-            print("Saving current best: model_best.pth ...")
-
+            print("Saving current best: best.pth ...")
+        
+        if save_last:
+            last_path = os.path.join(self.checkpoint_dir, 'last.pt')
+            torch.save(state, last_path)
+        
+        if (not save_best) and (not save_last): #save by period
+            filename = os.path.join(self.checkpoint_dir, 'ckpt-epoch{}.pt'.format(epoch))
+            torch.save(state, filename)
+            print("Saving checkpoint: {} ...".format(filename))
+        
     def _resume_checkpoint(self, resume_path):
         """
         Resume from saved checkpoints
