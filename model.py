@@ -2,7 +2,7 @@ import contextlib
 import math
 import torch
 import torch.nn as nn
-from modules import Conv, Bottleneck, SPPF, C2f, Concat, ImplicitA, ImplicitM, IHead, Decoder
+from modules import Conv, Bottleneck, SPPF, C2f, Concat, ImplicitA, ImplicitM, Decoder
 import yaml
 
 def make_divisible(x, divisor):
@@ -23,13 +23,12 @@ def parse_model(d, ch, version='n'):  # model_dict, input_channels(3)
 
     ch = [ch]
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
-    for i, (f, n, m, args) in enumerate(d['backbone']):  # from, number, module, args
+    for i, (f, n, m, args) in enumerate(d['backbone']+d['head'][:-1]):  # from, number, module, args
         m = getattr(torch.nn, m[3:]) if 'nn.' in m else globals()[m]  # get module
         for j, a in enumerate(args):
             if isinstance(a, str):
                 with contextlib.suppress(ValueError):
                     args[j] = locals()[a] if a in locals() else ast.literal_eval(a)
-
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
         # if m in (Classify, Conv, ConvTranspose, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, Focus,
         #          BottleneckCSP, C1, C2, C2f, C3, C3TR, C3Ghost, nn.ConvTranspose2d, DWConvTranspose2d, C3x):
@@ -47,8 +46,6 @@ def parse_model(d, ch, version='n'):  # model_dict, input_channels(3)
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
-        elif m in (Detect,):
-            args.append([ch[x] for x in f])
         else:
             c2 = ch[f]
 
@@ -86,22 +83,57 @@ def fuse_conv_and_bn(conv, bn):
 
     return fusedconv
 
+class Backbone(nn.Module):
+    def __init__(self, version='n') -> None:
+        super().__init__()
+        #back bone
+        with open('v8_pretrained/yolov8.yaml') as f:
+            d = yaml.safe_load(f)
+        self.backbone, self.save = parse_model(d, 3, version)
+
+    def forward(self, inp):
+        assert inp.shape[1] == 3
+        out_bb = {}
+        x = inp
+
+        for i in range(len(self.backbone)):
+            # print(i)
+            if i not in [11, 14, 17, 20]:
+                x = self.backbone[i](x)
+                if i in [4, 6, 9, 12, 15, 18]:
+                    out_bb[i] = x
+            elif i == 11:
+                x = self.backbone[i]((x, out_bb[6]))
+            elif i == 14:
+                x = self.backbone[i]((x, out_bb[4]))
+            elif i == 17:
+                x = self.backbone[i]((x, out_bb[12]))
+            elif i == 20:
+                x = self.backbone[i]((x, out_bb[9]))
+        
+        # del out_bb[4]
+        # del out_bb[6]
+        # del out_bb[9]
+        # del out_bb[12]
+        return out_bb[15], out_bb[18], x
+
 class Neck(nn.Module):
-    def __init__(self, ch, repeat) -> None:
+    def __init__(self, ch) -> None:
         super().__init__()
         self.concat = Concat(1)
-        self.c2f_1 = C2f(ch[4], ch[0]) #for layer9
-        self.c2f_2 = C2f(ch[3], ch[0]) #for layer12
-        self.c2f_3 = C2f(ch[2], ch[0]) #for layer15
+        c = ch[1]
+        self.c2f_1 = Conv(ch[4], c, k=3) #for layer21
+        self.c2f_2 = Conv(ch[3], c, k=3) #for layer18
+        self.c2f_3 = Conv(ch[2], c, k=3) #for layer15
         
-        self.ia = ImplicitA(ch[0]*3)
-        self.ims = nn.ModuleList([ImplicitM(ch[0]) for i in range(3)])
+        self.ia = ImplicitA(c*3)
+        self.ims = nn.ModuleList([ImplicitM(c) for i in range(3)])
 
-    def forward(self, out_9, out_12, out_15):
-        up1 = nn.Upsample(None, 8, 'bilinear')(out_9)
+    def forward(self, out_15, out_18, out_21):
+        up1 = nn.Upsample(None, 8, 'bilinear')(out_21)
         up1 = self.c2f_1(up1)
         
-        up2 = nn.Upsample(None, 4, 'bilinear')(out_12)
+        up2 = nn.Upsample(None, 4, 'bilinear')(out_18)
         up2 = self.c2f_2(up2)
 
         up3 = nn.Upsample(None, 2, 'bilinear')(out_15)
@@ -111,9 +143,49 @@ class Neck(nn.Module):
 
         return x
 
+class IHead(nn.Module):
+    def __init__(self, ch, nc=20) -> None:
+        super().__init__()
+        c = ch[1]
+        self.ia, self.im = ImplicitA(c), ImplicitM(c)
+        self.conv1 = Conv(c*3, ch[2], k=3, s=1)
+        self.conv2 = Conv(ch[2], ch[1], k=3, s=1)
+        self.conv3 = Conv(ch[1], c, k=3, s=1)
+
+        self.hm_out = nn.Sequential(
+            Conv(c, c, 3, 1), self.ia,
+            Conv(c, c, 3, 1), self.im,
+            nn.Conv2d(c, nc, 1, bias=True),
+            nn.Sigmoid()
+        )
+
+        self.wh_out = nn.Sequential(
+            Conv(c, c, 3, 1), self.ia,
+            Conv(c, c, 3, 1), self.im,
+            nn.Conv2d(c, 2, 1, bias=False),
+            nn.ReLU()
+        )
+
+        self.reg_out = nn.Sequential(
+            Conv(c, c, 3, 1), self.ia,
+            Conv(c, c, 3, 1), self.im,
+            nn.Conv2d(c, 2, 1, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        x = self.conv3(self.conv2(self.conv1(x)))
+        
+        out_hm = self.hm_out(x)
+        out_wh = self.wh_out(x)
+        out_reg = self.reg_out(x)
+
+        return out_hm, out_wh, out_reg
+
 class Model(nn.Module):
     def __init__(self, version='n', nc=80, max_boxes= 100, is_training=True):
         super().__init__()
+        self.version = version
         scales = dict(
         # [depth, width, max_channels]
         n= [0.33, 0.25, 1024],  # YOLOv8n summary: 225 layers,  3157200 parameters,  3157184 gradients,   8.9 GFLOPs
@@ -124,56 +196,52 @@ class Model(nn.Module):
         )
         gd, gw, max_channels = scales[version]
         ch = [make_divisible(c_*gw, 8) for c_ in [64, 128, 256, 512, max_channels]] #16, 32, 64, 128, 256
-        repeat = [max(round(i*gd), 1) for i in [3, 6]]
+        # repeat = [max(round(i*gd), 1) for i in [3, 6]]
 
-        #back bone
-        with open('v8_pretrained/yolov8.yaml') as f:
-            d = yaml.safe_load(f)
-        self.backbone, _ = parse_model(d, 3, version)
-        try: 
-            v8_pretrained = 'v8_pretrained/yolov8%s.pt'%version
-            self.backbone.load_state_dict(torch.load(v8_pretrained), strict=False)
-            print('Load successfully yolov8 backbone weights !')
-        except:
-            print('Cannot load yolov8 backbone weights !')
-            pass
+        self.backbone = Backbone(version)
 
-        #neck
-        self.layer_10_13 = nn.Upsample(None, 2, 'nearest')
-        self.layer_11_14_17_20 = Concat(1)
-        self.layer_12 = C2f(ch[3]+ch[4] , ch[3]) 
-        self.layer_15 = C2f(ch[2]+ch[3] , ch[2])
-        
-        self.neck = Neck(ch, repeat)
+        self.neck = Neck(ch)
         self.head = IHead(ch, nc)
         
         self.is_training = is_training
-        self.decoder = Decoder(max_boxes)
+        self.decoder = Decoder(max_boxes)        
         
-    def forward(self, inp):
-        assert inp.shape[1] == 3
-        out_bb = []
-        x = inp
+        self._init_weights()
 
-        for i in range(len(self.backbone)):
-            x = self.backbone[i](x)
-            if i in [4, 6, 9]:
-                out_bb.append(x)
-        
-        x = self.layer_10_13(x)
-        x = self.layer_11_14_17_20((x, out_bb[1]))
-        out_12 = self.layer_12(x)
-        x = self.layer_10_13(out_12)
-        x = self.layer_11_14_17_20((x, out_bb[0]))
-        out_15 = self.layer_15(x)
-        out = self.neck(out_bb[-1], out_12, out_15)
-        out = self.head(out)
+    def forward(self, inp):
+        out15, out18, out21 = self.backbone(inp)
+        x = self.neck(out15, out18, out21)
+        out = self.head(x)
         if not self.is_training:
             detections = self.decoder(out)
             return detections
         return out
+    
+    def _init_weights(self):
+        # try: 
+        v8_pretrained = 'v8_pretrained/yolov8%s.pt'%self.version
+        self.backbone.load_state_dict(torch.load(v8_pretrained), strict=False)
+        print('Load successfully yolov8%s backbone weights !'%self.version)
+        # except:
+        #     print('Cannot load yolov8%s backbone weights !'%self.version)
+        #For all module inside head and neck
+        for m in list(self.head.modules()) + list(self.neck.modules()):
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
 
-    def fuse(self, verbose=True):
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+        #For only last conv2d in self.hm_out modules            
+        m = self.head.hm_out[-2]
+        if isinstance(m, nn.Conv2d):
+            if m.bias is not None:
+                nn.init.constant_(m.bias, -4.6)  
+
+    def fuse(self):
         """
         Fuse the `Conv2d()` and `BatchNorm2d()` layers of the model into a single layer, in order to improve the
         computation efficiency.

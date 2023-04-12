@@ -2,17 +2,24 @@ import torch
 import numpy as np
 import yaml
 from tqdm import tqdm
-
+import torchinfo
 
 def test_model():
-    from model import Model
-    with open('yolov8n.yaml') as f:
-        d = yaml.safe_load(f)
-
+    from model import Model, Backbone
+ 
+    '''
+    n -> 6M, s-> 26M, m->68M
+    '''
     backbone = Model('n', nc=2)
+    # backbone = Backbone('m')
+    torchinfo.summary(backbone, input_size=(1, 3, 640, 640), depth=1)
+    total = sum(dict((p.data_ptr(), p.numel()) for p in backbone.parameters()).values())
+    print(total)
     data = np.random.random((2, 3, 640, 640)).astype('float32')
     data = torch.from_numpy(data)
+    # res = backbone.test(data)
     res = backbone(data)
+    # print(res.shape)
     print(res[0].shape, res[1].shape, res[2].shape)
 
 def totensor(arr):
@@ -60,4 +67,4 @@ def test_generator():
             assert False
 
 if __name__ == '__main__':
-    test_generator()
+    test_model()
