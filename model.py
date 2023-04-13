@@ -121,13 +121,13 @@ class Neck(nn.Module):
     def __init__(self, ch) -> None:
         super().__init__()
         self.concat = Concat(1)
-        c = ch[1]
-        self.c2f_1 = Conv(ch[4], c, k=3) #for layer21
-        self.c2f_2 = Conv(ch[3], c, k=3) #for layer18
-        self.c2f_3 = Conv(ch[2], c, k=3) #for layer15
+        c = 64 #c=ch[1]
+        self.c2f_1 = Conv(ch[4], c, k=1, bias=True) #for layer21
+        self.c2f_2 = Conv(ch[3], c, k=1, bias=True) #for layer18
+        self.c2f_3 = Conv(ch[2], c, k=1, bias=True) #for layer15
         
-        self.ia = ImplicitA(c*3)
-        self.ims = nn.ModuleList([ImplicitM(c) for i in range(3)])
+        self.ia = ImplicitA(c, std=0.05)
+        self.ims = nn.ModuleList([ImplicitM(c, std=0.05) for i in range(3)])
 
     def forward(self, out_15, out_18, out_21):
         up1 = nn.Upsample(None, 8, 'bilinear')(out_21)
@@ -139,38 +139,39 @@ class Neck(nn.Module):
         up3 = nn.Upsample(None, 2, 'bilinear')(out_15)
         up3 = self.c2f_3(up3)
 
-        x = self.ia(self.concat([self.ims[0](up1), self.ims[1](up2), self.ims[2](up3)]))
-
+        # x = self.ia(self.concat([self.ims[0](up1), self.ims[1](up2), self.ims[2](up3)]))
+        x = self.ims[0](up1) + self.ims[1](up2) + self.ims[2](up3)
+        x = self.ia(x)
         return x
 
 class IHead(nn.Module):
     def __init__(self, ch, nc=20) -> None:
         super().__init__()
-        c = ch[1]
+        c = 64 #c = ch[1]
         self.ia, self.im = ImplicitA(c), ImplicitM(c)
-        self.conv1 = Conv(c*3, ch[2], k=3, s=1)
-        self.conv2 = Conv(ch[2], ch[1], k=3, s=1)
-        self.conv3 = Conv(ch[1], c, k=3, s=1)
+        self.conv1 = Conv(c, c*3, k=3, s=1, bias=True)
+        self.conv2 = Conv(c*3, c*2, k=3, s=1, bias=True)
+        self.conv3 = Conv(c*2, c, k=3, s=1, bias=True)
 
         self.hm_out = nn.Sequential(
-            Conv(c, c, 3, 1), self.ia,
-            Conv(c, c, 3, 1), self.im,
+            Conv(c, c, 3, 1, bias=True), self.ia,
+            Conv(c, c, 3, 1, bias=True), self.im,
             nn.Conv2d(c, nc, 1, bias=True),
             nn.Sigmoid()
         )
 
         self.wh_out = nn.Sequential(
-            Conv(c, c, 3, 1), self.ia,
-            Conv(c, c, 3, 1), self.im,
-            nn.Conv2d(c, 2, 1, bias=False),
-            nn.ReLU()
+            Conv(c, c, 3, 1, bias=True), self.ia,
+            Conv(c, c, 3, 1, bias=True), self.im,
+            nn.Conv2d(c, 2, 1, bias=True),
+            # nn.ReLU()
         )
 
         self.reg_out = nn.Sequential(
-            Conv(c, c, 3, 1), self.ia,
-            Conv(c, c, 3, 1), self.im,
-            nn.Conv2d(c, 2, 1, bias=False),
-            nn.Sigmoid()
+            Conv(c, c, 3, 1, bias=True), self.ia,
+            Conv(c, c, 3, 1, bias=True), self.im,
+            nn.Conv2d(c, 2, 1, bias=True),
+            # nn.Sigmoid()
         )
 
     def forward(self, x):
@@ -218,12 +219,12 @@ class Model(nn.Module):
         return out
     
     def _init_weights(self):
-        # try: 
-        v8_pretrained = 'v8_pretrained/yolov8%s.pt'%self.version
-        self.backbone.load_state_dict(torch.load(v8_pretrained), strict=False)
-        print('Load successfully yolov8%s backbone weights !'%self.version)
-        # except:
-        #     print('Cannot load yolov8%s backbone weights !'%self.version)
+        try: 
+            v8_pretrained = 'v8_pretrained/yolov8%s.pt'%self.version
+            self.backbone.load_state_dict(torch.load(v8_pretrained), strict=True)
+            print('Load successfully yolov8%s backbone weights !'%self.version)
+        except:
+            print('Cannot load yolov8%s backbone weights !'%self.version)
         #For all module inside head and neck
         for m in list(self.head.modules()) + list(self.neck.modules()):
             if isinstance(m, nn.Conv2d):

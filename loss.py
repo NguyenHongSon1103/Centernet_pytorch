@@ -23,8 +23,8 @@ def _neg_loss(pred, gt):
 
     loss = 0
 
-    pos_loss = torch.log(pred) * torch.pow(1 - pred, 2) * pos_inds
-    neg_loss = torch.log(1 - pred) * torch.pow(pred, 2) * neg_weights * neg_inds
+    pos_loss = torch.log(torch.clip(pred, 1e-4, 1. - 1e-4)) * torch.pow(1 - pred, 2) * pos_inds
+    neg_loss = torch.log(torch.clip(1 - pred, 1e-4, 1. - 1e-4)) * torch.pow(pred, 2) * neg_weights * neg_inds
 
     num_pos  = pos_inds.float().sum()
     pos_loss = pos_loss.sum()
@@ -130,7 +130,7 @@ class Loss(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.hm_loss = FocalLoss()
-        self.wh_loss = RegL1Loss()
+        self.wh_loss = RegLoss()
         self.reg_loss = RegLoss()
         self.loss_keys = ['hm_loss', 'wh_loss', 'reg_loss', 'total_loss']
     

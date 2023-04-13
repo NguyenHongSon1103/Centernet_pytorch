@@ -8,9 +8,9 @@ def test_model():
     from model import Model, Backbone
  
     '''
-    n -> 6M, s-> 26M, m->68M
+    n -> 2.9M, s-> 9.7M, m->22.8M
     '''
-    backbone = Model('n', nc=2)
+    backbone = Model('m', nc=10)
     # backbone = Backbone('m')
     torchinfo.summary(backbone, input_size=(1, 3, 640, 640), depth=1)
     total = sum(dict((p.data_ptr(), p.numel()) for p in backbone.parameters()).values())
