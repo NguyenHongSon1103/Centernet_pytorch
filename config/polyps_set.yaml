@@ -1,27 +1,25 @@
 #----------------------- 
 # Model architecture One of ['tiny', 's', 'm', 'l', 'x']
 #-----------------------
-
 version: 'n'
-
 #-----------------------
 # Data path
 #-----------------------
-nc : 1
+nc : 2
 names : 
-  polyps : 0
+#  polyps : 0
   adenomatous : 0
-  hyperplastic : 0
+  hyperplastic : 1
   
-# test: ''
-train : ''
-val : ''
+test: /home/s/sonnh/PolypsSet_converted/test2019/images
+train : /home/s/sonnh/PolypsSet_converted/train2019/images
+val : /home/s/sonnh/PolypsSet_converted/val2019/images
 #-----------------------
 # Training configs
 #-----------------------
 gpu : '0'
 input_size : 640
-batch_size : 1
+batch_size : 16
 epochs : 100
 optimizer :
   type : Adam
@@ -31,7 +29,7 @@ optimizer :
   warmup_steps : 10000
 
 max_boxes : 100
-save_dir : 'save_dir/test'
+save_dir : 'save_dir/polypsset_20230412_2n'
 save_period: 5
 resume : False
 resume_checkpoint : ''
@@ -46,8 +44,8 @@ spatial:
     scale_x: [0.5, 1.5] #ratio for x axis 
     scale_y: [0.5, 1.5] #ratio for y axis
     keep_ratio: False #keep original ratio or not
-    translate_x: 0 # ratio for x axis
-    translate_y: 0 # ratio for y axis
+    translate_x: [0, 0.1] # ratio for x axis
+    translate_y: [0, 0.1] # ratio for y axis
     rotate: 5 # +/- degree 
     shear: 0 # +/- degree
     hflip: 0.2 # prob for horizontal flip
@@ -57,8 +55,8 @@ visual: # all prob
     keep: 0.5
     color_jiiter: 0.2 
     blur: 0.1
-    image_compression: 0.1
-    gray: 0.1
+    image_compression: 0.0
+    gray: 0.0
     
 advanced: #all prob
     keep: 0.5

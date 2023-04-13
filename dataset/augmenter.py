@@ -45,7 +45,8 @@ class SpatialAugmenter:
         self.p = spatial_config['keep']
         
         T = [
-            A.BBoxSafeRandomCrop(erosion_rate=0.2, p=spatial_config['crop']),
+            # A.BBoxSafeRandomCrop(erosion_rate=0.2, p=spatial_config['crop']),
+            A.RandomSizedBBoxSafeCrop(640, 640, 0, p=spatial_config['crop']),
             A.Affine(scale={'x':spatial_config['scale_x'], 'y':spatial_config['scale_y']},
                     keep_ratio=spatial_config['keep_ratio'],
                     translate_percent={'x':spatial_config['translate_x'], 'y':spatial_config['translate_y']},

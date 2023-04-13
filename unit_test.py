@@ -45,8 +45,9 @@ def test_loss():
 def test_generator():
     from dataset.generator import Generator
     from torch.utils.data import DataLoader
+    from utils import save_batch
 
-    with open('config/contract_block.yaml') as f:
+    with open('config/default.yaml') as f:
         cfg = yaml.safe_load(f)
     
     train_dataset = Generator(cfg, mode='train')
@@ -55,16 +56,18 @@ def test_generator():
     val_loader    = DataLoader(val_dataset, batch_size=cfg['batch_size'], num_workers=0)
 
     # val_dataset.generate_coco_format('val_labels.json')
-    for i in tqdm(range(len(train_dataset)), total=len(train_dataset)):
-        print(train_dataset.data[i])
-        x = train_dataset[i]
-        print(x[0].shape, x[1][1][:3])
+    for batch_idx, (items, target, im_paths) in tqdm(enumerate(train_loader), total=len(train_loader)):
+        save_batch(im_paths, items, 640, cfg['save_dir'], str(batch_idx)+'.jpg')
+        # batch = train_loader[i]
+        # print(train_dataset.data[i])
+        # x = train_dataset[i]
+        # print(x[0].shape, x[1][1][:3])
 
         # print(d[0].shape)
         # print(d[1][0].shape, d[1][1].shape, d[1][2].shape, d[1][3].shape)
         # print(d[2])
-        if i == 5: 
+        if batch_idx == 5: 
             assert False
 
 if __name__ == '__main__':
-    test_model()
+    test_generator()

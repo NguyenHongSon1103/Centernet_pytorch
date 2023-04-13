@@ -65,7 +65,7 @@ class BaseTrainer:
         print('%s    '*key_nums%tuple(['Epoch', 'lr']+self.loss_keys))
         
         pbar = tqdm(enumerate(self.data_loader), total=len(self.data_loader))
-        for batch_idx, (data, target) in pbar:
+        for batch_idx, (data, target, im_paths) in pbar:
             data = data.to(self.device).permute(0, 3, 1, 2)
             target = [tg.to(self.device) for tg in target]
             #transpose image to 3xHxC
@@ -78,7 +78,7 @@ class BaseTrainer:
             #Convert tensor to scalar    
             loss_dict = {key:loss_dict[key].item() for key in loss_dict}
 
-            pbar.set_description('%d    '%epoch + '%10.4f'%self.optimizer.param_groups[0]['lr'] + \
+            pbar.set_description('%d    '%epoch + "{:.2e}    ".format(self.optimizer.param_groups[0]['lr']) + \
                                  '%10.4f    '*(key_nums-2)%tuple([loss_dict[key] for key in loss_dict]))
 
             #Update history loss:
@@ -152,6 +152,9 @@ class BaseTrainer:
                 metrics = self._valid_epoch(epoch)
                 for key in metrics:
                     self.val_metrics[key].append(metrics[key])
+            
+            #Shuffle data each epoch
+            self.data_loader.dataset.on_epoch_end()
 
             ## save logged informations into log dict and to csv ##
             logs = []
