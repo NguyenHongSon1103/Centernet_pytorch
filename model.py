@@ -221,7 +221,7 @@ class Model(nn.Module):
     def _init_weights(self):
         try: 
             v8_pretrained = 'v8_pretrained/yolov8%s.pt'%self.version
-            self.backbone.load_state_dict(torch.load(v8_pretrained), strict=True)
+            self.backbone.load_state_dict(torch.load(v8_pretrained, map_location='cpu')['model'], strict=False)
             print('Load successfully yolov8%s backbone weights !'%self.version)
         except:
             print('Cannot load yolov8%s backbone weights !'%self.version)

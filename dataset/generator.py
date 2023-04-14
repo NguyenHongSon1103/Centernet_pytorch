@@ -143,10 +143,9 @@ class Generator(Dataset):
     def __getitem__(self, idx):
         d = deepcopy(self.data[idx])
         item = self.load_item(d)
-        h, w = item['image'].shape[:2]
         ##Augmentation
         if self.mode == 'train':
-            item = self.advanced_augmenter(item)
+            # item = self.advanced_augmenter(item)
             src_item = deepcopy(item)
             src_item = self.misc_augmenter(src_item) 
             #bug: Lost box after spatial transform, happen a few time
@@ -155,7 +154,7 @@ class Generator(Dataset):
                 item = src_item
             item = self.visual_augmenter(item)
             
-            
+        h, w = item['image'].shape[:2]
         item['image'] = cv2.cvtColor(item['image'], cv2.COLOR_BGR2RGB)
         item['image'] = self.resizer.resize_image(item['image'])
         item['boxes'] = self.resizer.resize_boxes(item['boxes'], (h, w)) #640x640

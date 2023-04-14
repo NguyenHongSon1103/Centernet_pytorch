@@ -26,8 +26,9 @@ os.makedirs(cfg['save_dir'], exist_ok=True)
 ## Load data [Done]
 train_dataset = Generator(cfg, mode='train')
 val_dataset   = Generator(cfg, mode='val')
-train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=cfg['batch_size'], num_workers=6)
-val_loader    = DataLoader(val_dataset, shuffle=False, batch_size=cfg['batch_size'], num_workers=6)
+train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=cfg['batch_size'],
+                           num_workers=8, pin_memory=True)
+val_loader    = DataLoader(val_dataset, shuffle=False, batch_size=cfg['batch_size'], num_workers=8)
 
 if not os.path.exists(os.path.join(cfg['save_dir'], 'val_labels.json')):
     val_dataset.generate_coco_format(os.path.join(cfg['save_dir'], 'val_labels.json'))

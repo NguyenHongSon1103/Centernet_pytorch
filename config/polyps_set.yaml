@@ -7,21 +7,21 @@ version: 'n'
 #-----------------------
 # Data path
 #-----------------------
-nc : 1
+nc : 2
 names : 
-  polyps : 0
+#  polyps : 0
   adenomatous : 0
-  hyperplastic : 0
+  hyperplastic : 1
   
-# test: ''
-train : ''
-val : ''
+test: '/data/sonnh8/ObjectDetectionMethods/PolypsSet/test2019/images'
+train : '/data/sonnh8/ObjectDetectionMethods/PolypsSet/train2019/images'
+val : '/data/sonnh8/ObjectDetectionMethods/PolypsSet/val2019/images'
 #-----------------------
 # Training configs
 #-----------------------
 gpu : '0'
 input_size : 640
-batch_size : 1
+batch_size : 16
 epochs : 100
 optimizer :
   type : Adam
@@ -31,7 +31,7 @@ optimizer :
   warmup_steps : 10000
 
 max_boxes : 100
-save_dir : 'save_dir/test'
+save_dir : 'save_dir/polyps_set'
 save_period: 5
 resume : False
 resume_checkpoint : ''
@@ -49,7 +49,7 @@ spatial:
     translate_x: 0 # ratio for x axis
     translate_y: 0 # ratio for y axis
     rotate: 5 # +/- degree 
-    shear: 0 # +/- degree
+    shear: 5 # +/- degree
     hflip: 0.2 # prob for horizontal flip
     vflip: 0.2 # prob for vertical flip
 
