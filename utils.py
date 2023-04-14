@@ -25,7 +25,7 @@ class Resizer:
     
     def resize_image(self, image):
         if self.mode == 'letterbox':
-            new_img = self.letterbox(image)
+            new_img = self.letterbox(image, (0, 0, 0))
         elif self.mode == 'keep':
             new_img = self.resize_keep_ar(image)
         elif self.mode == 'no keep':
@@ -216,7 +216,6 @@ def draw_msra_gaussian(heatmap, center, sigma):
     g[g_y[0]:g_y[1], g_x[0]:g_x[1]])
     return heatmap
 
-
 def draw_gaussian_2(heatmap, center, radius, k=1):
     diameter = 2 * radius + 1
     gaussian = gaussian2D_2((diameter, diameter), sigma=diameter / 6)
@@ -237,7 +236,6 @@ def draw_gaussian_2(heatmap, center, radius, k=1):
 #         heatmap[ x - left:x + right, y - top:y + bottom] = np.maximum(masked_heatmap, masked_gaussian * k)
 
     return heatmap
-
 
 def gaussian2D(shape, sigma_w=1, sigma_h=1):
     m, n = [(ss - 1.) / 2. for ss in shape]
@@ -277,11 +275,9 @@ def gaussian_radius(det_size, min_overlap=0.7):
     r3 = (b3 + sq3) / 2
     return max(0, min(r1, r2, r3))
 
-
 def emojis(string=''):
     # Return platform-dependent emoji-safe version of string
     return string.encode().decode('ascii', 'ignore') if WINDOWS else string
-
 
 def colorstr(*input):
     # Colors a string https://en.wikipedia.org/wiki/ANSI_escape_code, i.e.  colorstr('blue', 'hello world')
@@ -314,10 +310,28 @@ def save_csv(info, save_dir, header=True):
     df.to_csv(os.path.join(save_dir, 'results.csv'), header=header,
               index=False, index_label=False, mode='a+')
 
-# def save_image(item, path):
-#     image = item['images'].copy()
-#     boxes = item['boxes'].copy()
-#     class_ids =  item['
+def save_batch(impaths, images, targets, size=640, save_dir='', name=''):
+    images = []
+    for impath, item in zip(impaths, list_item):
+        imname = os.path.basename(impath)
+        img = item['image'].copy()
+        #convert img from float to uint8
+        img = (img*255.0).astype('uint8')
+        for box, cls_id in zip(item['boxes'], item['class_ids']):
+            x1, y1, x2, y2 = [int(p) for p in box]
+            img = cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 1)
+            ret, baseline = cv2.getTextSize(str(cls_id), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            img = cv2.rectangle(img, (x1, y1- ret[1] - baseline), (x1 + ret[0], y1), (255, 255, 255), -1)
+            img = cv2.putText(img, str(cls_id), (x1, y1 - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            img = cv2.putText(img, imname, (5, 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        images.append(img)
+    #merge each 9 images: 
+    image = np.zeros((size*3, size*3, 3))
+    for i in range(3):
+        for j in range(3):
+            sc, ec, sr, er = i*size, (i+1)*size, j*size, (j+1)*size 
+            image[sc:ec, sr:er] = images[i*3+j]
+    cv2.imwrite(os.path.join(save_dir, name), cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 
 if __name__ == '__main__':
     gaussian2D((3, 3))
