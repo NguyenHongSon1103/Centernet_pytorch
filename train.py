@@ -21,6 +21,7 @@ with open(args.config) as f:
 
 cfg['save_dir'] = os.path.abspath(cfg['save_dir'])
 os.makedirs(cfg['save_dir'], exist_ok=True)
+os.makedirs(os.path.join(cfg['save_dir'], 'preprocessed'), exist_ok=True)
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = str(cfg['gpu'])
 ## Load data [Done]

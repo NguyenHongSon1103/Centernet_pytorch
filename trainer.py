@@ -9,7 +9,7 @@ import os
 from tqdm import tqdm
 from PIL import Image
 from eval import evaluate, evaluate_all
-from utils import save_csv
+from utils import save_csv, save_batch
 
 class BaseTrainer:
     def __init__(self,  model, loss_fn, optimizer, device,
@@ -66,6 +66,11 @@ class BaseTrainer:
         
         pbar = tqdm(enumerate(self.data_loader), total=len(self.data_loader))
         for batch_idx, (data, target, im_paths) in pbar:
+            if epoch == 0:
+                #Save first epoch's images:
+                save_batch(im_paths, data.numpy(), [tg.numpy() for tg in target],
+                 640, self.config['save_dir'], str(batch_idx)+'.jpg')
+
             data = data.to(self.device).permute(0, 3, 1, 2)
             target = [tg.to(self.device) for tg in target]
             #transpose image to 3xHxC
@@ -89,6 +94,8 @@ class BaseTrainer:
             if batch_idx % self.log_step == 0:
                 global_step = (epoch - 1) * self.epochs + batch_idx
                 self._write_tensorboard(loss_dict, global_step)
+            
+            
 
 
         if self.lr_scheduler is not None:
@@ -286,10 +293,9 @@ class BaseTrainer:
             for batch_idx, (data, _, im_paths) in pbar:
                 data = data.to(self.device).permute(0, 3, 1, 2)
                 
-                output = self.model(data)
-                predictions = self.model.decoder(output)[0].cpu().numpy() #Nx100x6
-                boxes, scores, class_ids = predictions[:, :4], predictions[:, 4], predictions[:, 5]
-
+                predictions = self.model(data)
+                # predictions = self.model.decoder(output)[0].cpu().numpy() #Nx100x6
+                # boxes, scores, class_ids = predictions[:, :4], predictions[:, 4], predictions[:, 5]
 
                 for prediction, im_path in zip(predictions, im_paths):
                     all_predictions.append({'im_path':im_path, 'pred':prediction})

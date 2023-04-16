@@ -3,6 +3,7 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 import torchinfo
+from time import time
 
 def test_model():
     from model import Model, Backbone
@@ -52,12 +53,17 @@ def test_generator():
     
     train_dataset = Generator(cfg, mode='train')
     val_dataset   = Generator(cfg, mode='val')
-    train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=cfg['batch_size'], num_workers=0)
-    val_loader    = DataLoader(val_dataset, batch_size=cfg['batch_size'], num_workers=0)
+    train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=cfg['batch_size'], num_workers=8)
+    val_loader    = DataLoader(val_dataset, batch_size=cfg['batch_size'], num_workers=8)
 
     # val_dataset.generate_coco_format('val_labels.json')
-    for batch_idx, (items, target, im_paths) in tqdm(enumerate(train_loader), total=len(train_loader)):
-        save_batch(im_paths, items, 640, cfg['save_dir'], str(batch_idx)+'.jpg')
+    s = time()
+    for batch_idx, (imgs, targets, im_paths) in enumerate(train_loader):
+        t = time()
+        print('load time: ', t-s)
+        s = t
+        save_batch(im_paths, imgs.numpy(), [tg.numpy() for tg in targets], 640, cfg['save_dir'], str(batch_idx)+'.jpg')
+        
         # batch = train_loader[i]
         # print(train_dataset.data[i])
         # x = train_dataset[i]

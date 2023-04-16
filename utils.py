@@ -25,7 +25,7 @@ class Resizer:
     
     def resize_image(self, image):
         if self.mode == 'letterbox':
-            new_img = self.letterbox(image, (0, 0, 0))
+            new_img = self.letterbox(image, (114, 114, 114))
         elif self.mode == 'keep':
             new_img = self.resize_keep_ar(image)
         elif self.mode == 'no keep':
@@ -311,27 +311,46 @@ def save_csv(info, save_dir, header=True):
               index=False, index_label=False, mode='a+')
 
 def save_batch(impaths, images, targets, size=640, save_dir='', name=''):
-    images = []
-    for impath, item in zip(impaths, list_item):
+    drews = []
+    for i, (impath, src_img) in enumerate(zip(impaths, images)):
         imname = os.path.basename(impath)
-        img = item['image'].copy()
+        img = src_img.copy()
         #convert img from float to uint8
         img = (img*255.0).astype('uint8')
-        for box, cls_id in zip(item['boxes'], item['class_ids']):
+        # Convert target from label to boxes
+        hm, wh, reg, indices = [targets[idx][i] for idx in range(4)]
+        cls_ids = np.where(hm == 1)[-1]
+        true_indices = indices[indices > 0]
+        true_wh, true_reg = wh[indices > 0], reg[indices > 0]
+        xc = true_indices % (size//4)
+        yc = true_indices // (size//4)
+        xmin = xc + true_reg[:, 0] - true_wh[:, 0]/2
+        # print(xc.shape, yc.shape, true_reg.shape, true_wh.shape)
+        boxes = np.stack([
+            xc + true_reg[:, 0] - true_wh[:, 0]/2,
+            yc + true_reg[:, 1] - true_wh[:, 1]/2,
+            xc + true_reg[:, 0] + true_wh[:, 0]/2,
+            yc + true_reg[:, 1] + true_wh[:, 1]/2
+        ], 0).transpose()
+        boxes = np.array(boxes)*4 #160 to 640
+
+        for box, cls_id in zip(boxes, cls_ids):
             x1, y1, x2, y2 = [int(p) for p in box]
             img = cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 1)
-            ret, baseline = cv2.getTextSize(str(cls_id), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            ret, baseline = cv2.getTextSize(str(cls_id), cv2.FONT_HERSHEY_SIMPLEX, 1, 1)
             img = cv2.rectangle(img, (x1, y1- ret[1] - baseline), (x1 + ret[0], y1), (255, 255, 255), -1)
-            img = cv2.putText(img, str(cls_id), (x1, y1 - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-            img = cv2.putText(img, imname, (5, 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        images.append(img)
+            img = cv2.putText(img, str(cls_id), (x1, y1 - baseline), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 1)
+            img = cv2.putText(img, imname, (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1)
+        drews.append(img)
     #merge each 9 images: 
-    image = np.zeros((size*3, size*3, 3))
+    image = np.zeros((size*3, size*3, 3), dtype='uint8')
+
     for i in range(3):
         for j in range(3):
             sc, ec, sr, er = i*size, (i+1)*size, j*size, (j+1)*size 
-            image[sc:ec, sr:er] = images[i*3+j]
-    cv2.imwrite(os.path.join(save_dir, name), cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            # print(sc, ec, sr, er, (i*3 +j))
+            image[sc:ec, sr:er] = drews[i*3+j]
+    cv2.imwrite(os.path.join(save_dir, 'preprocessed', name), cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 
 if __name__ == '__main__':
     gaussian2D((3, 3))
