@@ -10,10 +10,11 @@ def test_model():
  
     '''
     n -> 2.9M, s-> 9.7M, m->22.8M
+    n -> 3.0M, s-> 11.8M, m-> 28.4M
     '''
-    backbone = Model('m', nc=10)
-    # backbone = Backbone('m')
-    torchinfo.summary(backbone, input_size=(1, 3, 640, 640), depth=1)
+    backbone = Model('m', nc=3)
+    # backbone = Backbone('n')
+    # torchinfo.summary(backbone, input_size=(1, 3, 640, 640), depth=1)
     total = sum(dict((p.data_ptr(), p.numel()) for p in backbone.parameters()).values())
     print(total)
     data = np.random.random((2, 3, 640, 640)).astype('float32')
@@ -76,4 +77,4 @@ def test_generator():
             assert False
 
 if __name__ == '__main__':
-    test_generator()
+    test_model()

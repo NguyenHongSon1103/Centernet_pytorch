@@ -2,7 +2,7 @@ import contextlib
 import math
 import torch
 import torch.nn as nn
-from modules import Conv, Bottleneck, SPPF, C2f, Concat, ImplicitA, ImplicitM, Decoder
+from modules import Conv, Bottleneck, SPPF, C2f, Concat, ImplicitA, ImplicitM, Decoder, ScaleFeatureSelection
 import yaml
 
 def make_divisible(x, divisor):
@@ -117,6 +117,26 @@ class Backbone(nn.Module):
         # del out_bb[12]
         return out_bb[15], out_bb[18], x
 
+class Backbone2(nn.Module):
+    def __init__(self, version='n') -> None:
+        super().__init__()
+        #back bone
+        with open('v8_pretrained/yolov8.yaml') as f:
+            d = yaml.safe_load(f)
+        self.backbone, self.save = parse_model(d, 3, version)
+
+    def forward(self, inp):
+        assert inp.shape[1] == 3
+        out_bb = []
+        x = inp
+
+        for i in range(10):
+            x = self.backbone[i](x)
+            if i in [2, 4, 6, 9]:
+                out_bb.append(x)
+
+        return out_bb
+
 class Neck(nn.Module):
     def __init__(self, ch) -> None:
         super().__init__()
@@ -144,10 +164,77 @@ class Neck(nn.Module):
         x = self.ia(x)
         return x
 
-class IHead(nn.Module):
-    def __init__(self, ch, nc=20) -> None:
+class Neck2(nn.Module):
+    def __init__(self,
+                 in_channels=[64, 128, 256, 512],
+                 inner_channels=256,
+                 bias=False,
+                attention_type='scale_spatial'):
+        '''
+        bias: Whether conv layers have bias or not.
+        '''
         super().__init__()
-        c = 64 #c = ch[1]
+        self.up5 = nn.Upsample(scale_factor=2, mode='nearest')
+        self.up4 = nn.Upsample(scale_factor=2, mode='nearest')
+        self.up3 = nn.Upsample(scale_factor=2, mode='nearest')
+
+        self.in5 = nn.Conv2d(in_channels[-1], inner_channels, 1, bias=bias)
+        self.in4 = nn.Conv2d(in_channels[-2], inner_channels, 1, bias=bias)
+        self.in3 = nn.Conv2d(in_channels[-3], inner_channels, 1, bias=bias)
+        self.in2 = nn.Conv2d(in_channels[-4], inner_channels, 1, bias=bias)
+
+        self.out5 = nn.Sequential(
+            nn.Conv2d(inner_channels, inner_channels // 4, 3, padding=1, bias=bias),
+            nn.Upsample(scale_factor=8, mode='nearest'))
+        self.out4 = nn.Sequential(
+            nn.Conv2d(inner_channels, inner_channels // 4, 3, padding=1, bias=bias),
+            nn.Upsample(scale_factor=4, mode='nearest'))
+        self.out3 = nn.Sequential(
+            nn.Conv2d(inner_channels, inner_channels // 4, 3, padding=1, bias=bias),
+            nn.Upsample(scale_factor=2, mode='nearest'))
+        self.out2 = nn.Conv2d(inner_channels, inner_channels//4, 3, padding=1, bias=bias)
+        self.out5.apply(self.weights_init)
+        self.out4.apply(self.weights_init)
+        self.out3.apply(self.weights_init)
+        self.out2.apply(self.weights_init)
+
+        self.concat_attention = ScaleFeatureSelection(inner_channels, inner_channels//4, attention_type=attention_type)
+
+        self.in5.apply(self.weights_init)
+        self.in4.apply(self.weights_init)
+        self.in3.apply(self.weights_init)
+        self.in2.apply(self.weights_init)
+
+    def weights_init(self, m):
+        classname = m.__class__.__name__
+        if classname.find('Conv') != -1:
+            nn.init.kaiming_normal_(m.weight.data)
+        elif classname.find('BatchNorm') != -1:
+            m.weight.data.fill_(1.)
+            m.bias.data.fill_(1e-4)
+
+    def forward(self, features):
+        c2, c3, c4, c5 = features
+        in5 = self.in5(c5)
+        in4 = self.in4(c4)
+        in3 = self.in3(c3)
+        in2 = self.in2(c2)
+
+        out4 = self.up5(in5) + in4  # 1/16
+        out3 = self.up4(out4) + in3  # 1/8
+        out2 = self.up3(out3) + in2  # 1/4
+        p5 = self.out5(in5)
+        p4 = self.out4(out4)
+        p3 = self.out3(out3)
+        p2 = self.out2(out2)
+
+        fuse = torch.cat((p5, p4, p3, p2), 1)
+        fuse = self.concat_attention(fuse, [p5, p4, p3, p2])
+        return fuse
+
+class IHead(nn.Module):
+    def __init__(self, c, nc=20) -> None:
+        super().__init__()
         self.ia, self.im = ImplicitA(c), ImplicitM(c)
         self.conv1 = Conv(c, c*3, k=3, s=1)
         self.conv2 = Conv(c*3, c*2, k=3, s=1)
@@ -199,10 +286,11 @@ class Model(nn.Module):
         ch = [make_divisible(c_*gw, 8) for c_ in [64, 128, 256, 512, max_channels]] #16, 32, 64, 128, 256
         # repeat = [max(round(i*gd), 1) for i in [3, 6]]
 
-        self.backbone = Backbone(version)
+        self.backbone = Backbone2(version)
 
-        self.neck = Neck(ch)
-        self.head = IHead(ch, nc)
+        # self.neck = Neck(ch)
+        self.neck = Neck2(ch[1:], ch[2])
+        self.head = IHead(ch[2], nc)
         
         self.is_training = is_training
         self.decoder = Decoder(max_boxes)        
@@ -210,13 +298,20 @@ class Model(nn.Module):
         self._init_weights()
 
     def forward(self, inp):
-        out15, out18, out21 = self.backbone(inp)
-        x = self.neck(out15, out18, out21)
-        out = self.head(x)
+        features = self.backbone(inp)
+        fuse = self.neck(features)
+        out = self.head(fuse)
         if not self.is_training:
             detections = self.decoder(out)
             return detections
         return out
+        # out15, out18, out21 = self.backbone(inp)
+        # x = self.neck(out15, out18, out21)
+        # out = self.head(x)
+        # if not self.is_training:
+        #     detections = self.decoder(out)
+        #     return detections
+        # return out
     
     def _init_weights(self):
         try: 
@@ -226,7 +321,7 @@ class Model(nn.Module):
         except:
             print('Cannot load yolov8%s backbone weights !'%self.version)
         #For all module inside head and neck
-        for m in list(self.head.modules()) + list(self.neck.modules()):
+        for m in list(self.head.modules()):
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
                 if m.bias is not None:
