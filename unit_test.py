@@ -3,6 +3,7 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 import torchinfo
+from time import time
 
 def test_model():
     from model import Model, Backbone
@@ -45,26 +46,34 @@ def test_loss():
 def test_generator():
     from dataset.generator import Generator
     from torch.utils.data import DataLoader
+    from utils import save_batch
 
-    with open('config/contract_block.yaml') as f:
+    with open('config/default.yaml') as f:
         cfg = yaml.safe_load(f)
     
     train_dataset = Generator(cfg, mode='train')
     val_dataset   = Generator(cfg, mode='val')
-    train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=cfg['batch_size'], num_workers=0)
-    val_loader    = DataLoader(val_dataset, batch_size=cfg['batch_size'], num_workers=0)
+    train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=cfg['batch_size'], num_workers=8)
+    val_loader    = DataLoader(val_dataset, batch_size=cfg['batch_size'], num_workers=8)
 
     # val_dataset.generate_coco_format('val_labels.json')
-    for i in tqdm(range(len(train_dataset)), total=len(train_dataset)):
-        print(train_dataset.data[i])
-        x = train_dataset[i]
-        print(x[0].shape, x[1][1][:3])
+    s = time()
+    for batch_idx, (imgs, targets, im_paths) in enumerate(train_loader):
+        t = time()
+        print('load time: ', t-s)
+        s = t
+        save_batch(im_paths, imgs.numpy(), [tg.numpy() for tg in targets], 640, cfg['save_dir'], str(batch_idx)+'.jpg')
+        
+        # batch = train_loader[i]
+        # print(train_dataset.data[i])
+        # x = train_dataset[i]
+        # print(x[0].shape, x[1][1][:3])
 
         # print(d[0].shape)
         # print(d[1][0].shape, d[1][1].shape, d[1][2].shape, d[1][3].shape)
         # print(d[2])
-        if i == 5: 
+        if batch_idx == 5: 
             assert False
 
 if __name__ == '__main__':
-    test_model()
+    test_generator()

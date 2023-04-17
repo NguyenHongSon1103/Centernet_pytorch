@@ -108,11 +108,12 @@ class Generator(Dataset):
         self.input_size = hparams['input_size']
         self.resizer = Resizer(self.input_size, mode='letterbox')
         self.stride = 4
-        self.output_size = self.input_size // self.stride
         self.max_objects = hparams['max_boxes']
         self.num_classes = hparams['nc']
         self.mode = mode
         self.mapper = hparams['names']
+        self.save_dir = os.path.join(hparams['save_dir'], 'preprocessed')
+        os.makedirs(self.save_dir, exist_ok=True)
 
         self.data = load_data(self.img_dirs, self.mode)
         self.assigner = Assigner(self.num_classes, self.input_size, self.stride, self.max_objects)
@@ -121,6 +122,17 @@ class Generator(Dataset):
         self.visual_augmenter = VisualAugmenter(hparams['visual'])
         self.misc_augmenter = SpatialAugmenter(hparams['spatial'])
         self.advanced_augmenter = AdvancedAugmenter(self, hparams['advanced'])
+    
+    def transform(self, item):
+        src_item = deepcopy(item)
+        src_item = self.advanced_augmenter(src_item)
+        src_item = self.misc_augmenter(src_item) 
+        #bug: Lost box after spatial transform, happen a few time
+        #still not know which transformation caused this
+        if len(src_item['boxes']) > 0:
+            item = src_item
+        item = self.visual_augmenter(item)
+        return item
         
     def on_epoch_end(self):
         np.random.shuffle(self.data)
@@ -136,36 +148,27 @@ class Generator(Dataset):
 
         item = {'image':image.copy(), 'boxes':boxes.copy(), 'class_ids':class_ids.copy()}
         return item
-
+    
     def __len__(self):
         return len(self.data)
     
     def __getitem__(self, idx):
         d = deepcopy(self.data[idx])
         item = self.load_item(d)
-        h, w = item['image'].shape[:2]
         ##Augmentation
         if self.mode == 'train':
-            item = self.advanced_augmenter(item)
-            src_item = deepcopy(item)
-            src_item = self.misc_augmenter(src_item) 
-            #bug: Lost box after spatial transform, happen a few time
-            #still not know which transformation caused this
-            if len(src_item['boxes']) > 0:
-                item = src_item
-            item = self.visual_augmenter(item)
+            item = self.transform(item)
             
-            
+        h, w = item['image'].shape[:2]
         item['image'] = cv2.cvtColor(item['image'], cv2.COLOR_BGR2RGB)
         item['image'] = self.resizer.resize_image(item['image'])
         item['boxes'] = self.resizer.resize_boxes(item['boxes'], (h, w)) #640x640
+
         item['image'] = item['image'].astype('float32') / 255.0
         
         hm, wh, reg, indices = self.assigner(item['boxes'], item['class_ids'])
-        if self.mode != 'train':
-            return item['image'], (hm, wh, reg, indices), d['im_path']
 
-        return item['image'], (hm, wh, reg, indices)
+        return item['image'], (hm, wh, reg, indices), d['im_path']
 
     def reverse_preprocess(self, image):
         image *= 255.0

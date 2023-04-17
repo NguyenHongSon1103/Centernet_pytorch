@@ -122,21 +122,21 @@ class Neck(nn.Module):
         super().__init__()
         self.concat = Concat(1)
         c = 64 #c=ch[1]
-        self.c2f_1 = Conv(ch[4], c, k=1, bias=True) #for layer21
-        self.c2f_2 = Conv(ch[3], c, k=1, bias=True) #for layer18
-        self.c2f_3 = Conv(ch[2], c, k=1, bias=True) #for layer15
+        self.c2f_1 = Conv(ch[4], c, k=1) #for layer21
+        self.c2f_2 = Conv(ch[3], c, k=1) #for layer18
+        self.c2f_3 = Conv(ch[2], c, k=1) #for layer15
         
         self.ia = ImplicitA(c, std=0.05)
         self.ims = nn.ModuleList([ImplicitM(c, std=0.05) for i in range(3)])
 
     def forward(self, out_15, out_18, out_21):
-        up1 = nn.Upsample(None, 8, 'bilinear')(out_21)
+        up1 = nn.Upsample(scale_factor=8)(out_21)
         up1 = self.c2f_1(up1)
         
-        up2 = nn.Upsample(None, 4, 'bilinear')(out_18)
+        up2 = nn.Upsample(scale_factor=4)(out_18)
         up2 = self.c2f_2(up2)
 
-        up3 = nn.Upsample(None, 2, 'bilinear')(out_15)
+        up3 = nn.Upsample(scale_factor=2)(out_15)
         up3 = self.c2f_3(up3)
 
         # x = self.ia(self.concat([self.ims[0](up1), self.ims[1](up2), self.ims[2](up3)]))
@@ -149,28 +149,28 @@ class IHead(nn.Module):
         super().__init__()
         c = 64 #c = ch[1]
         self.ia, self.im = ImplicitA(c), ImplicitM(c)
-        self.conv1 = Conv(c, c*3, k=3, s=1, bias=True)
-        self.conv2 = Conv(c*3, c*2, k=3, s=1, bias=True)
-        self.conv3 = Conv(c*2, c, k=3, s=1, bias=True)
+        self.conv1 = Conv(c, c*3, k=3, s=1)
+        self.conv2 = Conv(c*3, c*2, k=3, s=1)
+        self.conv3 = Conv(c*2, c, k=3, s=1)
 
         self.hm_out = nn.Sequential(
-            Conv(c, c, 3, 1, bias=True), self.ia,
-            Conv(c, c, 3, 1, bias=True), self.im,
+            Conv(c, c, 3, 1), self.ia,
+            Conv(c, c, 3, 1), self.im,
             nn.Conv2d(c, nc, 1, bias=True),
             nn.Sigmoid()
         )
 
         self.wh_out = nn.Sequential(
-            Conv(c, c, 3, 1, bias=True), self.ia,
-            Conv(c, c, 3, 1, bias=True), self.im,
-            nn.Conv2d(c, 2, 1, bias=True),
+            Conv(c, c, 3, 1), self.ia,
+            Conv(c, c, 3, 1), self.im,
+            nn.Conv2d(c, 2, 1),
             # nn.ReLU()
         )
 
         self.reg_out = nn.Sequential(
-            Conv(c, c, 3, 1, bias=True), self.ia,
-            Conv(c, c, 3, 1, bias=True), self.im,
-            nn.Conv2d(c, 2, 1, bias=True),
+            Conv(c, c, 3, 1), self.ia,
+            Conv(c, c, 3, 1), self.im,
+            nn.Conv2d(c, 2, 1),
             # nn.Sigmoid()
         )
 

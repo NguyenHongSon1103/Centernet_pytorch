@@ -7,21 +7,21 @@ version: 'n'
 #-----------------------
 # Data path
 #-----------------------
-nc : 1
+nc : 2
 names : 
   polyps : 0
   adenomatous : 0
-  hyperplastic : 0
+  hyperplastic : 1
   
 # test: /home/s/sonnh/polyp_data/test/images
-train : D:/VNG/E2EObjectDetection/dummy/images
-val : D:/VNG/E2EObjectDetection/dummy/images
+train : D:/VNG/E2EObjectDetection/PolypsSet_converted/train2019/images
+val :  D:/VNG/E2EObjectDetection/PolypsSet_converted/val2019/images
 #-----------------------
 # Training configs
 #-----------------------
 gpu : '0'
 input_size : 640
-batch_size : 1
+batch_size : 16
 epochs : 100
 optimizer :
   type : Adam
