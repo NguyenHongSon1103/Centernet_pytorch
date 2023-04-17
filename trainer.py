@@ -94,6 +94,8 @@ class BaseTrainer:
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()
         
+        #Shuffle data after each epoch 
+        self.data_loader.dataset.on_epoch_end()
         #Get mean history loss for return
         history_loss_mean = {key:np.mean(history_loss[key]) for key in self.loss_keys}
         return history_loss_mean
