@@ -8,6 +8,24 @@ import numpy as np
 import os
 import pandas as pd
 
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        if self.count > 0:
+          self.avg = self.sum / self.count
+
 class HiddenPrints:
     def __enter__(self):
         self._original_stdout = sys.stdout
@@ -277,7 +295,7 @@ def gaussian_radius(det_size, min_overlap=0.7):
 
 def emojis(string=''):
     # Return platform-dependent emoji-safe version of string
-    return string.encode().decode('ascii', 'ignore') if WINDOWS else string
+    return string.encode().decode('ascii', 'ignore') #if WINDOWS else string
 
 def colorstr(*input):
     # Colors a string https://en.wikipedia.org/wiki/ANSI_escape_code, i.e.  colorstr('blue', 'hello world')
