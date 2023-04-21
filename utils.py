@@ -8,6 +8,24 @@ import numpy as np
 import os
 import pandas as pd
 
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        if self.count > 0:
+          self.avg = self.sum / self.count
+
 class HiddenPrints:
     def __enter__(self):
         self._original_stdout = sys.stdout
@@ -25,7 +43,7 @@ class Resizer:
     
     def resize_image(self, image):
         if self.mode == 'letterbox':
-            new_img = self.letterbox(image, (0, 0, 0))
+            new_img = self.letterbox(image, (114, 114, 114))
         elif self.mode == 'keep':
             new_img = self.resize_keep_ar(image)
         elif self.mode == 'no keep':
@@ -177,7 +195,7 @@ def parse_xml(xml):
 
 def emojis(string=''):
     # Return platform-dependent emoji-safe version of string
-    return string.encode().decode('ascii', 'ignore') if WINDOWS else string
+    return string.encode().decode('ascii', 'ignore') #if WINDOWS else string
 
 def colorstr(*input):
     # Colors a string https://en.wikipedia.org/wiki/ANSI_escape_code, i.e.  colorstr('blue', 'hello world')
@@ -249,7 +267,7 @@ def save_batch(impaths, images, targets, blend_heatmap=True, size=640, save_dir=
         
         drews.append(img)
         # Blend heatmap
-    
+
     #merge each 9 images: 
     image = np.zeros((size*3, size*3, 3), dtype='uint8')
 
@@ -257,6 +275,7 @@ def save_batch(impaths, images, targets, blend_heatmap=True, size=640, save_dir=
         for j in range(3):
             if i*3+j > len(drews): break
             sc, ec, sr, er = i*size, (i+1)*size, j*size, (j+1)*size 
+
             image[sc:ec, sr:er] = drews[i*3+j]
     cv2.imwrite(os.path.join(save_dir, 'preprocessed', name), cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 

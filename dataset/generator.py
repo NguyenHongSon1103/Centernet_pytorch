@@ -124,6 +124,17 @@ class Generator(Dataset):
         self.visual_augmenter = VisualAugmenter(hparams['visual'])
         self.misc_augmenter = SpatialAugmenter(hparams['spatial'])
         self.advanced_augmenter = AdvancedAugmenter(self, hparams['advanced'])
+    
+    def transform(self, item):
+        src_item = deepcopy(item)
+        src_item = self.advanced_augmenter(src_item)
+        src_item = self.misc_augmenter(src_item) 
+        #bug: Lost box after spatial transform, happen a few time
+        #still not know which transformation caused this
+        if len(src_item['boxes']) > 0:
+            item = src_item
+        item = self.visual_augmenter(item)
+        return item
         
         self.old_transformer = OldTransformer()
         
