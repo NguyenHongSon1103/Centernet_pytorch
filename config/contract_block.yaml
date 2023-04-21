@@ -24,9 +24,9 @@ test: /data/sonnh8/Contract/new_contract_block_data/val/images
 #-----------------------
 # Training configs
 #-----------------------
-gpu : '1'
+gpu : '0'
 input_size : 640
-batch_size : 18
+batch_size : 16
 epochs : 100
 optimizer :
   type : Adam
@@ -47,7 +47,7 @@ resume_checkpoint : ''
          
 spatial: 
     keep: 0.5 # prob for keep original images
-    crop: 0.0 # prob for BBoxSafeRandomCrop
+    crop: 0.2 # prob for BBoxSafeRandomCrop
     scale_x: [0.5, 1.5] #ratio for x axis 
     scale_y: [0.5, 1.5] #ratio for y axis
     keep_ratio: False #keep original ratio or not

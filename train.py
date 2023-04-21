@@ -1,54 +1,121 @@
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 import numpy as np
 import os
 from argparse import ArgumentParser
 import yaml
+from PIL import Image
 from dataset.generator import Generator
 from model import Model
-from torchinfo import summary
 from loss import Loss
-from trainer import BaseTrainer
+from evaluate import generate_coco_format_predict, generate_coco_format, evaluate
+from utils import save_batch
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import RichProgressBar, ModelCheckpoint
 
+class LightningModel(pl.LightningModule):
+    def __init__(self, config, resizer=None):
+        super().__init__()
+        self.example_input_array = torch.Tensor(2, 3, 640, 640)
+        self.save_hyperparameters()
+        self.model = Model(version=config['version'], nc=config['nc'], max_boxes=config['max_boxes'], is_training=True)
+        self.config = config
+        self.loss_fn = Loss()
+        self.resizer = resizer
+        self.validation_step_outputs = []
+        
+    def forward(self, x):
+        out = self.model(x)
+        detections = self.model.decoder(out)
+        return detections
+    
+    def configure_optimizers(self):
+        opt_config = self.config['optimizer']
+        optimizer = torch.optim.Adam(self.parameters(), lr=opt_config['base_lr'])
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                T_max=self.config['epochs'], eta_min=opt_config['end_lr'])
+        
+        return {'optimizer':optimizer, 'lr_scheduler':scheduler}
+    
+    def training_step(self, batch, batch_idx):
+        images, targets, impaths = batch
+        
+        # Save trained images to disk: Default first 100 step
+        if batch_idx < 100:
+            save_batch(impaths, images.cpu().numpy(), 
+                       [tg.cpu().numpy() for tg in targets], blend_heatmap=True,
+                       size=self.config['input_size'], save_dir=self.config['save_dir'],
+                       name=str(batch_idx)+'.jpg')
+        
+        images = images.permute(0, 3, 1, 2) #transpose image to 3xHxC
+        output = self.model(images)
+        loss, loss_dict = self.loss_fn(output, targets)
+        for key in loss_dict:
+            self.log(key, loss_dict[key].item(), prog_bar=True, on_step=False, on_epoch=True)
+        
+        return loss
+    
+    def validation_step(self, val_batch, batch_idx):
+        images, targets, impaths = val_batch
+        images = images.permute(0, 3, 1, 2) #transpose image to 3xHxC
+        # targets = [tg.to(self.device) for tg in targets]
+        
+        with torch.no_grad():
+            out = self.model(images)
+            predictions = self.model.decoder(out).cpu().numpy() #Nx100x6
+        
+        for prediction, im_path in zip(predictions, impaths):
+            raw_boxes, scores, class_ids = prediction[..., :4], prediction[..., 4], prediction[..., 5].astype('int32')
+            im_w, im_h = Image.open(im_path).size
+            raw_boxes = raw_boxes * 4
+            boxes = self.resizer.rescale_boxes(raw_boxes, (im_h, im_w))
+            self.validation_step_outputs.append({'im_path':im_path, 'boxes':boxes, 'scores':scores, 'class_ids':class_ids})
+    
+    def on_validation_epoch_end(self):
+        total_output = np.stack(self.validation_step_outputs)
+        pred_path = os.path.join(self.config['save_dir'], 'val_predictions.json')
+        label_path = os.path.join(config['save_dir'], 'val_labels.json')
+        generate_coco_format_predict(total_output, pred_path)
+        stats = evaluate(label_path, pred_path)
+        val_metrics = {'mAP50':stats[1], 'mAP50-95':stats[0]}
+        print('mAP@50    : %8.3f'%stats[1])
+        print('mAP@50:95 : %8.3f'%stats[0])
+        self.log_dict(val_metrics, prog_bar=False, on_step=False, on_epoch=True)
+        self.validation_step_outputs.clear()
+        
+        
 parser = ArgumentParser()
 parser.add_argument('--config', default='config/default.yaml')
 args = parser.parse_args()
 
 ## Load config
 with open(args.config) as f:
-    cfg = yaml.safe_load(f)
+    config = yaml.safe_load(f)
 
-cfg['save_dir'] = os.path.abspath(cfg['save_dir'])
-os.makedirs(cfg['save_dir'], exist_ok=True)
+## prepair save directory 
+config['save_dir'] = os.path.abspath(config['save_dir'])
+os.makedirs(config['save_dir'], exist_ok=True)
+os.makedirs(os.path.join(config['save_dir'], 'preprocessed'), exist_ok=True)
 
-# os.environ['CUDA_VISIBLE_DEVICES'] = str(cfg['gpu'])
-## Load data [Done]
-train_dataset = Generator(cfg, mode='train')
-val_dataset   = Generator(cfg, mode='val')
-train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=cfg['batch_size'],
+## Load data
+train_dataset = Generator(config, mode='train')
+val_dataset   = Generator(config, mode='val')
+train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=config['batch_size'],
                            num_workers=8, pin_memory=True)
-val_loader    = DataLoader(val_dataset, shuffle=False, batch_size=cfg['batch_size'], num_workers=8)
+val_loader    = DataLoader(val_dataset, shuffle=False, batch_size=config['batch_size'], num_workers=8)
 
-if not os.path.exists(os.path.join(cfg['save_dir'], 'val_labels.json')):
-    val_dataset.generate_coco_format(os.path.join(cfg['save_dir'], 'val_labels.json'))
-
-## Load model
-model = Model(version=cfg['version'], nc=cfg['nc'], max_boxes=cfg['max_boxes'], is_training=True)
-device = torch.device('cuda:'+cfg['gpu']) if torch.cuda.is_available() else torch.device('cpu')
-# device = torch.device('cpu')
-model.to(device)
-
-# summary(model, input_size=(1, 3, cfg['input_size'], cfg['input_size']))## Get optimizer and loss
-opt_cfg = cfg['optimizer']
-optimizer = torch.optim.Adam(model.parameters(), lr=opt_cfg['base_lr'])
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
-                T_max=cfg['epochs'], eta_min=opt_cfg['end_lr'])
-
-loss_fn = Loss()
-
-trainer = BaseTrainer(model, loss_fn, optimizer, device, train_loader, val_loader, test_data_loader=None,
-                lr_scheduler=scheduler, config=cfg)
+generate_coco_format(val_dataset, os.path.join(config['save_dir'], 'val_labels.json'))
 
 if __name__ == '__main__':
-    trainer.train()
+    ## Load model
+    model = LightningModel(config, resizer=val_dataset.resizer)
+
+    pbar = RichProgressBar(refresh_rate=1, leave=True)
+    ckpt = ModelCheckpoint(dirpath=config['save_dir'], filename='{epoch}_{mAP50-95:.2f}',
+                           monitor='mAP50-95', mode='max', save_last=True,
+                           every_n_epochs=config['save_period'])
+
+    trainer = pl.Trainer(max_epochs=config['epochs'], default_root_dir=config['save_dir'], profiler='simple',
+                            accelerator="gpu", devices=config['gpu'],
+                            callbacks=[pbar, ckpt])
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)

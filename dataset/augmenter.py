@@ -187,7 +187,7 @@ class AdvancedAugmenter:
                              scale_x + xmax * (1 - scale_x), scale_y + ymax * (1 - scale_y), c]
                 for (xmin, ymin, xmax, ymax, c) in annos]
 
-        #filter out anno with height or width smaller than 0.02% image size
+        #filter out anno with height or width smaller than 0.02 image size
         new_anno = [anno for anno in new_anno if
                     0.02 < (anno[2]-anno[0]) and 0.02 < (anno[3] - anno[1])]
 

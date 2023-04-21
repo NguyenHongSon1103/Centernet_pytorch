@@ -2,17 +2,17 @@ import torch
 import numpy as np
 import yaml
 from tqdm import tqdm
-import torchinfo
+# import torchinfo
 
 def test_model():
-    from model import Model, Backbone
+    from model_2 import Model, Backbone
  
     '''
     n -> 2.9M, s-> 9.7M, m->22.8M
     '''
-    backbone = Model('m', nc=10)
-    # backbone = Backbone('m')
-    torchinfo.summary(backbone, input_size=(1, 3, 640, 640), depth=1)
+    # backbone = Model('n', nc=5)
+    backbone = Backbone('n')
+    # torchinfo.summary(backbone, input_size=(1, 3, 640, 640), depth=1)
     total = sum(dict((p.data_ptr(), p.numel()) for p in backbone.parameters()).values())
     print(total)
     data = np.random.random((2, 3, 640, 640)).astype('float32')
@@ -20,7 +20,7 @@ def test_model():
     # res = backbone.test(data)
     res = backbone(data)
     # print(res.shape)
-    print(res[0].shape, res[1].shape, res[2].shape)
+    print(res[0].shape, res[1].shape, res[2].shape, res[3].shape)
 
 def totensor(arr):
     return torch.from_numpy(arr)
@@ -70,4 +70,5 @@ def test_generator():
             assert False
 
 if __name__ == '__main__':
-    test_generator()
+    #test_generator()
+    test_model()

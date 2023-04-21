@@ -110,11 +110,7 @@ class Backbone(nn.Module):
                 x = self.backbone[i]((x, out_bb[12]))
             elif i == 20:
                 x = self.backbone[i]((x, out_bb[9]))
-        
-        # del out_bb[4]
-        # del out_bb[6]
-        # del out_bb[9]
-        # del out_bb[12]
+
         return out_bb[15], out_bb[18], x
 
 class Neck(nn.Module):
@@ -221,7 +217,7 @@ class Model(nn.Module):
     def _init_weights(self):
         try: 
             v8_pretrained = 'v8_pretrained/yolov8%s.pt'%self.version
-            self.backbone.load_state_dict(torch.load(v8_pretrained, map_location='cpu')['model'], strict=False)
+            self.backbone.load_state_dict(torch.load(v8_pretrained, map_location='cpu'), strict=False)
             print('Load successfully yolov8%s backbone weights !'%self.version)
         except:
             print('Cannot load yolov8%s backbone weights !'%self.version)

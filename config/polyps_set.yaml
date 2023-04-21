@@ -18,7 +18,7 @@ val : '/data/sonnh8/ObjectDetectionMethods/PolypsSet/val2019/images'
 #-----------------------
 # Training configs
 #-----------------------
-gpu : '0'
+gpu : [0] #[0] if want to use only gpu 0
 input_size : 640
 batch_size : 16
 epochs : 100
@@ -30,11 +30,7 @@ optimizer :
   warmup_steps : 10000
 
 max_boxes : 100
-<<<<<<< HEAD
 save_dir : 'save_dir/polyps_set'
-=======
-save_dir : 'save_dir/polypsset_20230412_2n'
->>>>>>> fbb9c79a550dfbd03fbde3ef86d95a5629d2db78
 save_period: 5
 resume : False
 resume_checkpoint : ''

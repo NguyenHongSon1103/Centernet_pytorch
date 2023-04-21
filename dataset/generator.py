@@ -8,6 +8,7 @@ import numpy as np
 import sys
 sys.path.append(os.getcwd())
 from .augmenter import VisualAugmenter, SpatialAugmenter, AdvancedAugmenter
+from .old_augmenter import OldTransformer
 from .assigner import Assigner
 from copy import deepcopy
 from utils import parse_xml, check_is_image, Resizer, colorstr
@@ -107,6 +108,7 @@ class Generator(Dataset):
         self.batch_size = hparams['batch_size']
         self.input_size = hparams['input_size']
         self.resizer = Resizer(self.input_size, mode='letterbox')
+        # self.resizer = Resizer(self.input_size, mode='keep')
         self.stride = 4
         self.max_objects = hparams['max_boxes']
         self.num_classes = hparams['nc']
@@ -123,6 +125,8 @@ class Generator(Dataset):
         self.misc_augmenter = SpatialAugmenter(hparams['spatial'])
         self.advanced_augmenter = AdvancedAugmenter(self, hparams['advanced'])
         
+        self.old_transformer = OldTransformer()
+        
     def on_epoch_end(self):
         np.random.shuffle(self.data)
     
@@ -135,26 +139,27 @@ class Generator(Dataset):
         boxes[..., [1, 3]] = np.clip(boxes[..., [1, 3]], 0, h)
         class_ids = np.array([self.mapper[name] for name in class_names])
 
-        item = {'image':image.copy(), 'boxes':boxes.copy(), 'class_ids':class_ids.copy()}
+        item = {'image':image, 'boxes':boxes, 'class_ids':class_ids}
         return item
     
     def __len__(self):
         return len(self.data)
     
     def __getitem__(self, idx):
-        d = deepcopy(self.data[idx])
+        d = self.data[idx]
         item = self.load_item(d)
         ##Augmentation
+        # if self.mode == 'train':
+        #     src_item = deepcopy(item)
+        #     src_item = self.advanced_augmenter(src_item)
+        #     src_item = self.misc_augmenter(src_item) 
+        #     #bug: Lost box after spatial transform, happen a few time
+        #     #still not know which transformation caused this
+        #     if len(src_item['boxes']) > 0:
+        #         item = src_item
+        #     item = self.visual_augmenter(item)
         if self.mode == 'train':
-
-            src_item = deepcopy(item)
-            src_item = self.advanced_augmenter(src_item)
-            src_item = self.misc_augmenter(src_item) 
-            #bug: Lost box after spatial transform, happen a few time
-            #still not know which transformation caused this
-            if len(src_item['boxes']) > 0:
-                item = src_item
-            item = self.visual_augmenter(item)
+            item = self.old_transformer(item)
 
         h, w = item['image'].shape[:2]
         item['image'] = cv2.cvtColor(item['image'], cv2.COLOR_BGR2RGB)
@@ -172,51 +177,3 @@ class Generator(Dataset):
         image = image.astype(np.uint8)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         return image
-
-    def generate_coco_format(self, save_path):
-        class_names = self.mapper.keys()
-        # for evaluation with pycocotools
-        dataset = {"categories": [], "annotations": [], "images": []}
-        for i, class_name in enumerate(class_names):
-            dataset["categories"].append(
-                {"id": i, "name": class_name, "supercategory": ""}
-            )
-
-        ann_id = 0
-        print('Check annotations ...')
-        for i, item in enumerate(self.data):
-            name = item['im_path'].split('/')[-1]
-            img_id = os.path.splitext(name)[0]
-            img_w, img_h = Image.open(item['im_path']).size
-            dataset["images"].append(
-                {
-                    "file_name": name,
-                    "id": img_id,
-                    "width": img_w,
-                    "height": img_h,
-                }
-            )
-            boxes, obj_names = item['boxes'], item['class_names']
-            for box, obj_name in zip(boxes, obj_names):
-                x1, y1, x2, y2 = [float(p) for p in box]
-                # cls_id starts from 0
-                cls_id = self.mapper[obj_name]
-                w = max(0, x2 - x1)
-                h = max(0, y2 - y1)
-                dataset["annotations"].append(
-                    {
-                        "area": h * w,
-                        "bbox": [x1, y1, w, h],
-                        "category_id": cls_id,
-                        "id": ann_id,
-                        "image_id": img_id,
-                        "iscrowd": 0,
-                        # mask
-                        "segmentation": [],
-                    }
-                )
-                ann_id += 1
-
-        with open(save_path, "w") as f:
-            json.dump(dataset, f)
-        print(f"Convert to COCO format finished. Resutls saved in {save_path}")

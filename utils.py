@@ -104,7 +104,7 @@ class Resizer:
         h = int(h * scale)
         w = int(w * scale)
         padimg = np.zeros((self.size[0], self.size[1], c), image.dtype)
-        padimg[:h, :w] = image
+        padimg[:h, :w] = cv2.resize(image, (w, h))
         return padimg
 
     def resize_wo_keep_ar(self, image):
@@ -175,106 +175,6 @@ def parse_xml(xml):
     obj_names = [obj_names[i] for i in indices]
     return boxes, obj_names
 
-def draw_gaussian(heatmap, center, radius_h, radius_w, k=1):
-    diameter_h = 2 * radius_h + 1
-    diameter_w = 2 * radius_w + 1
-    gaussian = gaussian2D((diameter_h, diameter_w), sigma_w=diameter_w / 6, sigma_h=diameter_h / 6)
-
-    x, y = int(center[0]), int(center[1])
-
-    height, width = heatmap.shape[0:2]
-
-    left, right = min(x, radius_w), min(width - x, radius_w + 1)
-    top, bottom = min(y, radius_h), min(height - y, radius_h + 1)
-
-    masked_heatmap = heatmap[y - top:y + bottom, x - left:x + right]
-    masked_gaussian = gaussian[radius_h - top:radius_h + bottom, radius_w - left:radius_w + right]
-    if min(masked_gaussian.shape) > 0 and min(masked_heatmap.shape) > 0:  # TODO debug
-        np.maximum(masked_heatmap, masked_gaussian * k, out=masked_heatmap)
-    return heatmap
-
-def draw_msra_gaussian(heatmap, center, sigma):
-    tmp_size = sigma * 3
-    mu_x = int(center[0] + 0.5)
-    mu_y = int(center[1] + 0.5)
-    w, h = heatmap.shape[0], heatmap.shape[1]
-    ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)]
-    br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)]
-    if ul[0] >= h or ul[1] >= w or br[0] < 0 or br[1] < 0:
-        return heatmap
-    size = 2 * tmp_size + 1
-    x = np.arange(0, size, 1, np.float32)
-    y = x[:, np.newaxis]
-    x0 = y0 = size // 2
-    g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
-    g_x = max(0, -ul[0]), min(br[0], h) - ul[0]
-    g_y = max(0, -ul[1]), min(br[1], w) - ul[1]
-    img_x = max(0, ul[0]), min(br[0], h)
-    img_y = max(0, ul[1]), min(br[1], w)
-    heatmap[img_y[0]:img_y[1], img_x[0]:img_x[1]] = np.maximum(
-    heatmap[img_y[0]:img_y[1], img_x[0]:img_x[1]],
-    g[g_y[0]:g_y[1], g_x[0]:g_x[1]])
-    return heatmap
-
-def draw_gaussian_2(heatmap, center, radius, k=1):
-    diameter = 2 * radius + 1
-    gaussian = gaussian2D_2((diameter, diameter), sigma=diameter / 6)
-    x, y = int(center[0]), int(center[1])
-
-    height, width = heatmap.shape[0:2]
-    left, right = min(x, radius), min(width - x, radius + 1)
-    top, bottom = min(y, radius), min(height - y, radius + 1)
-    
-    masked_heatmap = heatmap[y - top:y + bottom, x - left:x + right]
-    masked_gaussian = gaussian[radius - top:radius + bottom, radius - left:radius + right]
-    if min(masked_gaussian.shape) > 0 and min(masked_heatmap.shape) > 0:  # TODO debug
-        heatmap[y - top:y + bottom, x - left:x + right] = np.maximum(masked_heatmap, masked_gaussian * k)
-
-#     masked_heatmap = heatmap[x - left:x + right, y - top:y + bottom]
-#     masked_gaussian = gaussian[radius - left:radius + right, radius - top:radius + bottom]
-#     if min(masked_gaussian.shape) > 0 and min(masked_heatmap.shape) > 0:  # TODO debug
-#         heatmap[ x - left:x + right, y - top:y + bottom] = np.maximum(masked_heatmap, masked_gaussian * k)
-
-    return heatmap
-
-def gaussian2D(shape, sigma_w=1, sigma_h=1):
-    m, n = [(ss - 1.) / 2. for ss in shape]
-    y, x = np.ogrid[-m:m + 1, -n:n + 1]
-
-    h = np.exp(-((x * x) / (2 * sigma_w * sigma_w) + (y * y) / (2 * sigma_h * sigma_h)))
-    h[h < np.finfo(h.dtype).eps * h.max()] = 0
-    return h
-
-def gaussian2D_2(shape, sigma=1):
-    m, n = [(ss - 1.) / 2. for ss in shape]
-    y, x = np.ogrid[-m:m + 1, -n:n + 1]
-
-    h = np.exp(-(x * x + y * y) / (2 * sigma * sigma))
-    h[h < np.finfo(h.dtype).eps * h.max()] = 0
-    return h
-
-def gaussian_radius(det_size, min_overlap=0.7):
-    height, width = det_size
-
-    a1 = 1
-    b1 = (height + width)
-    c1 = width * height * (1 - min_overlap) / (1 + min_overlap)
-    sq1 = np.sqrt(b1 ** 2 - 4 * a1 * c1)
-    r1 = (b1 + sq1) / 2
-
-    a2 = 4
-    b2 = 2 * (height + width)
-    c2 = (1 - min_overlap) * width * height
-    sq2 = np.sqrt(b2 ** 2 - 4 * a2 * c2)
-    r2 = (b2 + sq2) / 2
-
-    a3 = 4 * min_overlap
-    b3 = -2 * min_overlap * (height + width)
-    c3 = (min_overlap - 1) * width * height
-    sq3 = np.sqrt(b3 ** 2 - 4 * a3 * c3)
-    r3 = (b3 + sq3) / 2
-    return max(0, min(r1, r2, r3))
-
 def emojis(string=''):
     # Return platform-dependent emoji-safe version of string
     return string.encode().decode('ascii', 'ignore') if WINDOWS else string
@@ -310,28 +210,55 @@ def save_csv(info, save_dir, header=True):
     df.to_csv(os.path.join(save_dir, 'results.csv'), header=header,
               index=False, index_label=False, mode='a+')
 
-def save_batch(impaths, images, targets, size=640, save_dir='', name=''):
-    images = []
-    for impath, item in zip(impaths, list_item):
+def save_batch(impaths, images, targets, blend_heatmap=True, size=640, save_dir='', name=''):
+    drews = []
+    for i, (impath, src_img) in enumerate(zip(impaths, images)):
         imname = os.path.basename(impath)
-        img = item['image'].copy()
+        img = src_img.copy()
         #convert img from float to uint8
         img = (img*255.0).astype('uint8')
-        for box, cls_id in zip(item['boxes'], item['class_ids']):
+        # Convert target from label to boxes
+        hm, wh, reg, indices = [targets[idx][i] for idx in range(4)]
+        cls_ids = np.where(hm == 1)[-1]
+        true_indices = indices[indices > 0]
+        true_wh, true_reg = wh[indices > 0], reg[indices > 0]
+        xc = true_indices % (size//4)
+        yc = true_indices // (size//4)
+        xmin = xc + true_reg[:, 0] - true_wh[:, 0]/2
+        # print(xc.shape, yc.shape, true_reg.shape, true_wh.shape)
+        boxes = np.stack([
+            xc + true_reg[:, 0] - true_wh[:, 0]/2,
+            yc + true_reg[:, 1] - true_wh[:, 1]/2,
+            xc + true_reg[:, 0] + true_wh[:, 0]/2,
+            yc + true_reg[:, 1] + true_wh[:, 1]/2
+        ], 0).transpose()
+        boxes = np.array(boxes)*4 #160 to 640
+
+        for box, cls_id in zip(boxes, cls_ids):
             x1, y1, x2, y2 = [int(p) for p in box]
             img = cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 1)
-            ret, baseline = cv2.getTextSize(str(cls_id), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            ret, baseline = cv2.getTextSize(str(cls_id), cv2.FONT_HERSHEY_SIMPLEX, 1, 1)
             img = cv2.rectangle(img, (x1, y1- ret[1] - baseline), (x1 + ret[0], y1), (255, 255, 255), -1)
-            img = cv2.putText(img, str(cls_id), (x1, y1 - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-            img = cv2.putText(img, imname, (5, 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        images.append(img)
+            img = cv2.putText(img, str(cls_id), (x1, y1 - baseline), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 1)
+            img = cv2.putText(img, imname, (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1)
+        
+        for cls_id in range(hm.shape[-1]):
+            heat = cv2.applyColorMap((hm[..., cls_id]*255).astype('uint8'), cv2.COLORMAP_JET)
+            heat = cv2.resize(heat, (size, size))
+            img = cv2.addWeighted(img, 0.8, heat.astype('uint8'), 0.2, 0.0)
+        
+        drews.append(img)
+        # Blend heatmap
+    
     #merge each 9 images: 
-    image = np.zeros((size*3, size*3, 3))
+    image = np.zeros((size*3, size*3, 3), dtype='uint8')
+
     for i in range(3):
         for j in range(3):
+            if i*3+j > len(drews): break
             sc, ec, sr, er = i*size, (i+1)*size, j*size, (j+1)*size 
-            image[sc:ec, sr:er] = images[i*3+j]
-    cv2.imwrite(os.path.join(save_dir, name), cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            image[sc:ec, sr:er] = drews[i*3+j]
+    cv2.imwrite(os.path.join(save_dir, 'preprocessed', name), cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 
 if __name__ == '__main__':
     gaussian2D((3, 3))

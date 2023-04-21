@@ -78,7 +78,7 @@ class BaseTrainer:
             #Convert tensor to scalar    
             loss_dict = {key:loss_dict[key].item() for key in loss_dict}
 
-            pbar.set_description('%d    '%epoch + "{:.2e}    ".format(self.optimizer.param_groups[0]['lr']) + \
+            pbar.set_description('%d    '%epoch + "{:.2e}".format(self.optimizer.param_groups[0]['lr']) + \
                                  '%10.4f    '*(key_nums-2)%tuple([loss_dict[key] for key in loss_dict]))
 
             #Update history loss:
@@ -120,8 +120,13 @@ class BaseTrainer:
                 output = self.model(data)
                 predictions = self.model.decoder(output).cpu().numpy()
                 
+                raw_boxes, scores, class_ids = detection[..., :4], detection[..., 4], detection[..., 5].astype('int32')
+                im_w, im_h = Image.open(item['im_path']).size
+                raw_boxes = raw_boxes * 4
+                boxes = self.resizer.rescale_boxes(raw_boxes, (im_h, im_w))
+                
                 for prediction, im_path in zip(predictions, im_paths):
-                    all_predictions.append({'im_path':im_path, 'pred':prediction})
+                    all_predictions.append({'im_path':im_path, 'boxes':, 'scores':, 'class_ids':class_ids})
             ## Calculate overall mAP ##
             save_path = os.path.join(self.config['save_dir'], 'val_predictions.json')
             lb_path = os.path.join(self.config['save_dir'], 'val_labels.json')
