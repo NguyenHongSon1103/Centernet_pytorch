@@ -5,6 +5,7 @@ import json
 import xml.etree.ElementTree as ET
 import os
 from utils import HiddenPrints
+from tqdm import tqdm
 
 def generate_coco_format(dataset, save_path):
     class_names = dataset.mapper.keys()
@@ -143,19 +144,52 @@ def log(stats, num_classes):
         f.write('mAP@50:95 | ')
         for i in range(num_classes):
             f.write('Class %d: %8.3f | '%(i, stats[i][0]))
-        f.write('\n')
+        f.write('\n')        
+
+def test(model, test_loader, config, device):
+    """
+    Validate after training an epoch
+
+    :return: A log that contains information about test
+    """
+    model.eval()
+    model.to(device)
+    test_step_outputs = []
+    pbar = tqdm(enumerate(test_loader), total=len(test_loader),
+                desc='%10s    '*2%('mAP50', 'mAP50-95'))
+
+    for batch_idx, (images, _, impaths) in pbar:
+        images = images.permute(0, 3, 1, 2).to(device) #transpose image to 3xHxC
+
+        with torch.no_grad():
+            predictions = model(images).cpu().numpy()
+            # predictions = model.decoder(out).cpu().numpy() #Nx100x6
+
+        for prediction, im_path in zip(predictions, impaths):
+            raw_boxes, scores, class_ids = prediction[..., :4], prediction[..., 4], prediction[..., 5].astype('int32')
+            im_w, im_h = Image.open(im_path).size
+            raw_boxes = raw_boxes * 4
+            boxes = test_loader.dataset.resizer.rescale_boxes(raw_boxes, (im_h, im_w))
+            test_step_outputs.append({'im_path':im_path, 'boxes':boxes, 'scores':scores, 'class_ids':class_ids})
+    ## Calculate overall mAP ##
+    save_path = os.path.join(config['save_dir'], 'test_predictions.json')
+    lb_path = os.path.join(config['save_dir'], 'test_labels.json')
+    generate_coco_format_predict(test_step_outputs, save_path)
+    generate_coco_format(test_loader.dataset, os.path.join(cfg['save_dir'], 'test_labels.json'))
+
+    stats = evaluate_all(lb_path, save_path)
+
+    return stats
         
 if __name__ == '__main__':
     import torch
-    import torch.nn as nn
     from torch.utils.data import DataLoader
     import numpy as np
-    import os
     from argparse import ArgumentParser
     import yaml
     from dataset.generator import Generator
-    from model import Model
-    from trainer import BaseTrainer
+    # from model import Model
+    from model_2 import Model
 
     parser = ArgumentParser()
     parser.add_argument('--config', default='config/default.yaml')
@@ -179,20 +213,16 @@ if __name__ == '__main__':
 
     ## Load data [Done]
     test_dataset = Generator(cfg, mode='test')
-    test_loader  = DataLoader(test_dataset, shuffle=False, batch_size=cfg['batch_size'], num_workers=6)
-
-    test_dataset.generate_coco_format(os.path.join(cfg['save_dir'], 'test_labels.json'))
+    test_loader  = DataLoader(test_dataset, shuffle=False, batch_size=cfg['batch_size'], num_workers=8)
 
     ## Load model
-    model = Model(version=cfg['version'], nc=cfg['nc'], max_boxes=cfg['max_boxes'], is_training=True)
-    model.load_state_dict(torch.load(args.weights)['state_dict'], strict=False)
-    print('Load successfully from checkpoint: %s'%args.weights)
-    model.eval()
-    model.to(device)
+    model = Model(version=cfg['version'], nc=cfg['nc'], max_boxes=cfg['max_boxes'], is_training=False)
+    model_weights = torch.load(args.weights, map_location='cpu')['state_dict']
+    for key in list(model_weights):
+        model_weights[key.replace("model.", "")] = model_weights.pop(key)
+    model.load_state_dict(model_weights, strict=True)
 
-    
-    trainer = BaseTrainer(model, None, None, device, data_loader=test_loader, test_data_loader=test_loader, config=cfg)
-    stats = trainer.test()
+    stats = test(model, test_loader, cfg, device)
     print_s(stats, cfg['nc'])
     
     

@@ -230,7 +230,7 @@ def save_csv(info, save_dir, header=True):
 
 def save_batch(impaths, images, targets, blend_heatmap=True, size=640, save_dir='', name=''):
     drews = []
-    for i, (impath, src_img) in enumerate(zip(impaths, images)):
+    for i, (impath, src_img) in enumerate(zip(impaths[:9], images)):
         imname = os.path.basename(impath)
         img = src_img.copy()
         #convert img from float to uint8

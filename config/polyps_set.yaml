@@ -18,19 +18,19 @@ val : '/data/sonnh8/ObjectDetectionMethods/PolypsSet/val2019/images'
 #-----------------------
 # Training configs
 #-----------------------
-gpu : [0] #[0] if want to use only gpu 0
-input_size : 640
-batch_size : 16
+gpu : [1] #[0] if want to use only gpu 0
+input_size : 512
+batch_size : 24
 epochs : 100
-optimizer :
-  type : Adam
-  base_lr : 0.001 #1e-3
-  end_lr : 0.00001 #1e-5
-  warmup_lr : 0.00002 #2e-5
-  warmup_steps : 10000
+optimizer : 
+  type : AdamW #Adam, AdamW or Lion
+  base_lr : 0.001 #1e-3 with Adam, AdamW and 1e-4 with Lion
+  end_lr : 0.000001 #1e-5
+  # warmup_lr : 0.00002 #2e-5
+  # warmup_steps : 10000
 
 max_boxes : 100
-save_dir : 'save_dir/polyps_set'
+save_dir : 'save_dir/polypsset_20230427'
 save_period: 5
 resume : False
 resume_checkpoint : ''
@@ -40,25 +40,25 @@ resume_checkpoint : ''
 #-----------------------
             
 spatial: 
-    keep: 0.5 # prob for keep original images
+    keep: 0.7 # prob for keep original images
     crop: 0.2 # prob for BBoxSafeRandomCrop
     scale_x: [0.5, 1.5] #ratio for x axis 
     scale_y: [0.5, 1.5] #ratio for y axis
     keep_ratio: False #keep original ratio or not
-    translate_x: [0, 0.1] # ratio for x axis
-    translate_y: [0, 0.1] # ratio for y axis
+    translate_x: 0 # ratio for x axis
+    translate_y: 0 # ratio for y axis
     rotate: 5 # +/- degree 
     shear: 5 # +/- degree
     hflip: 0.2 # prob for horizontal flip
     vflip: 0.2 # prob for vertical flip
 
 visual: # all prob
-    keep: 0.5
+    keep: 0.7
     color_jiiter: 0.2 
     blur: 0.1
     image_compression: 0.0
     gray: 0.0
     
 advanced: #all prob
-    keep: 0.5
+    keep: 0.8
     mosaic: 0.0

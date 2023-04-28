@@ -6,14 +6,14 @@ from tqdm import tqdm
 from time import time
 
 def test_model():
-    from model_2 import Model, Backbone
+    from model import Model, Backbone
  
     '''
     n -> 2.9M, s-> 9.7M, m->22.8M
     n -> 3.0M, s-> 11.8M, m-> 28.4M
     '''
-    # backbone = Model('n', nc=5)
-    backbone = Backbone('n')
+    backbone = Model('n', nc=5)
+    # backbone = Backbone('n')
     # torchinfo.summary(backbone, input_size=(1, 3, 640, 640), depth=1)
     total = sum(dict((p.data_ptr(), p.numel()) for p in backbone.parameters()).values())
     print(total)
@@ -22,7 +22,7 @@ def test_model():
     # res = backbone.test(data)
     res = backbone(data)
     # print(res.shape)
-    print(res[0].shape, res[1].shape, res[2].shape, res[3].shape)
+    print(res[0].shape, res[1].shape, res[2].shape)
 
 def totensor(arr):
     return torch.from_numpy(arr)

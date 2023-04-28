@@ -107,8 +107,8 @@ class Generator(Dataset):
         self.img_dirs = hparams[mode]
         self.batch_size = hparams['batch_size']
         self.input_size = hparams['input_size']
-        self.resizer = Resizer(self.input_size, mode='letterbox')
-        # self.resizer = Resizer(self.input_size, mode='keep')
+        # self.resizer = Resizer(self.input_size, mode='letterbox')
+        self.resizer = Resizer(self.input_size, mode='keep')
         self.stride = 4
         self.max_objects = hparams['max_boxes']
         self.num_classes = hparams['nc']
@@ -124,20 +124,9 @@ class Generator(Dataset):
         self.visual_augmenter = VisualAugmenter(hparams['visual'])
         self.misc_augmenter = SpatialAugmenter(hparams['spatial'])
         self.advanced_augmenter = AdvancedAugmenter(self, hparams['advanced'])
-    
-    def transform(self, item):
-        src_item = deepcopy(item)
-        src_item = self.advanced_augmenter(src_item)
-        src_item = self.misc_augmenter(src_item) 
-        #bug: Lost box after spatial transform, happen a few time
-        #still not know which transformation caused this
-        if len(src_item['boxes']) > 0:
-            item = src_item
-        item = self.visual_augmenter(item)
-        return item
         
-        self.old_transformer = OldTransformer()
-        
+        # self.old_transformer = OldTransformer()
+                
     def on_epoch_end(self):
         np.random.shuffle(self.data)
     
@@ -160,17 +149,16 @@ class Generator(Dataset):
         d = self.data[idx]
         item = self.load_item(d)
         ##Augmentation
-        # if self.mode == 'train':
-        #     src_item = deepcopy(item)
-        #     src_item = self.advanced_augmenter(src_item)
-        #     src_item = self.misc_augmenter(src_item) 
-        #     #bug: Lost box after spatial transform, happen a few time
-        #     #still not know which transformation caused this
-        #     if len(src_item['boxes']) > 0:
-        #         item = src_item
-        #     item = self.visual_augmenter(item)
         if self.mode == 'train':
-            item = self.old_transformer(item)
+            src_item = deepcopy(item)
+            # if self.advanced_augmenter is not None:
+            src_item = self.advanced_augmenter(src_item)
+            src_item = self.misc_augmenter(src_item) 
+            #bug: Lost box after spatial transform, happen a few time
+            #still not know which transformation caused this
+            if len(src_item['boxes']) > 0:
+                item = src_item
+            item = self.visual_augmenter(item)
 
         h, w = item['image'].shape[:2]
         item['image'] = cv2.cvtColor(item['image'], cv2.COLOR_BGR2RGB)

@@ -128,23 +128,23 @@ class Assigner:
         heatmap[..., cls_id] = draw_gaussian_2(heatmap[...,cls_id], ct_int, radius)
         return heatmap
 
-    def compute_targets_each_image(self, boxes, class_id):
-        hm = np.zeros((self.output_size, self.output_size, self.num_classes), dtype=np.float32)
-        whm = np.zeros((self.output_size, self.output_size, 2), dtype=np.float32)
-        reg = np.zeros((self.output_size, self.output_size, 2), dtype=np.float32)
-        for i, (box, cls_id) in enumerate(zip(boxes, class_id)):
-            #scale box to output size
-            xmin, ymin, xmax, ymax = [p/self.stride for p in box]
-            h_box, w_box = ymax - ymin, xmax - xmin
-            if h_box < 0 or w_box < 0:
-                continue
-            x_center, y_center = (xmax + xmin) / 2.0, (ymax + ymin) / 2.0
-            x_center_floor, y_center_floor = int(np.floor(x_center)), int(np.floor(y_center))
-            hm = self.get_heatmap_per_box(hm, cls_id, (x_center_floor, y_center_floor), (h_box, w_box))
-            whm[x_center_floor, y_center_floor] = [w_box, h_box]
-            reg[x_center_floor, y_center_floor] = x_center - x_center_floor, y_center - y_center_floor
+#     def compute_targets_each_image(self, boxes, class_id):
+#         hm = np.zeros((self.output_size, self.output_size, self.num_classes), dtype=np.float32)
+#         whm = np.zeros((self.output_size, self.output_size, 2), dtype=np.float32)
+#         reg = np.zeros((self.output_size, self.output_size, 2), dtype=np.float32)
+#         for i, (box, cls_id) in enumerate(zip(boxes, class_id)):
+#             #scale box to output size
+#             xmin, ymin, xmax, ymax = [p/self.stride for p in box]
+#             h_box, w_box = ymax - ymin, xmax - xmin
+#             if h_box < 0 or w_box < 0:
+#                 continue
+#             x_center, y_center = (xmax + xmin) / 2.0, (ymax + ymin) / 2.0
+#             x_center_floor, y_center_floor = int(np.floor(x_center)), int(np.floor(y_center))
+#             hm = self.get_heatmap_per_box(hm, cls_id, (x_center_floor, y_center_floor), (h_box, w_box))
+#             whm[x_center_floor, y_center_floor] = [w_box, h_box]
+#             reg[x_center_floor, y_center_floor] = x_center - x_center_floor, y_center - y_center_floor
 
-        return hm, whm, reg
+#         return hm, whm, reg
     
     def compute_target(self, boxes, class_id):
         hm = np.zeros((self.output_size, self.output_size, self.num_classes), dtype=np.float32)
