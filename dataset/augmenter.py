@@ -30,7 +30,6 @@ class VisualAugmenter:
         ## Keep self.keep_prob original image
         if np.random.random() < self.p:
             return data
-    
         res = self.transform(image=data['image'])['image']
         augmented_data = deepcopy(data)
         augmented_data['image'] = res

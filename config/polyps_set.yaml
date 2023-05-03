@@ -11,26 +11,26 @@ names :
   adenomatous : 0
   hyperplastic : 1
   
-test: '/data/sonnh8/ObjectDetectionMethods/PolypsSet/test2019/images'
 train : '/data/sonnh8/ObjectDetectionMethods/PolypsSet/train2019/images'
 val : '/data/sonnh8/ObjectDetectionMethods/PolypsSet/val2019/images'
+test: '/data/sonnh8/ObjectDetectionMethods/PolypsSet/test2019/images'
 
 #-----------------------
 # Training configs
 #-----------------------
 gpu : [1] #[0] if want to use only gpu 0
 input_size : 512
-batch_size : 24
+batch_size : 16
 epochs : 100
 optimizer : 
   type : AdamW #Adam, AdamW or Lion
   base_lr : 0.001 #1e-3 with Adam, AdamW and 1e-4 with Lion
-  end_lr : 0.000001 #1e-5
+  end_lr : 0.00001 #1e-5
   # warmup_lr : 0.00002 #2e-5
   # warmup_steps : 10000
 
 max_boxes : 100
-save_dir : 'save_dir/polypsset_20230427'
+save_dir : 'save_dir/polypsset_20230502'
 save_period: 5
 resume : False
 resume_checkpoint : ''

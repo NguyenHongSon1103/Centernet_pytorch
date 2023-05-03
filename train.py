@@ -80,14 +80,16 @@ class LightningModel(pl.LightningModule):
         if opt_config['type'] == 'Adam':
             optimizer = torch.optim.Adam(self.parameters(), lr=opt_config['base_lr'])
         elif opt_config['type'] == 'AdamW':
-            optimizer = torch.optim.AdamW(self.parameters(), lr=opt_config['base_lr'])
+            optimizer = torch.optim.AdamW(self.parameters(), lr=opt_config['base_lr'],
+                                         foreach=True)
         else:
-            optimizer = Lion(self.parameters(), lr=opt_config['base_lr'])                                                                               
-        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
-        #         T_max=self.config['epochs'], eta_min=opt_config['end_lr'])
-        
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                    milestones=[50, 80], gamma=0.1)
+            # optimizer = Lion(self.parameters(), lr=opt_config['base_lr'])  
+            optimizer = torch.optim.SGD(self.parameters(), lr=opt_config['base_lr'])
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                T_max=self.config['epochs'], eta_min=opt_config['end_lr'])
+    
+        # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+        #             milestones=[50, 80], gamma=0.1)
         
         return {'optimizer':optimizer, 'lr_scheduler':scheduler}
     
@@ -95,11 +97,11 @@ class LightningModel(pl.LightningModule):
         images, targets, impaths = batch
         
         # Save trained images to disk: Default first 100 step
-        if batch_idx < 30:
-            save_batch(impaths, images.cpu().numpy(), 
-                       [tg.cpu().numpy() for tg in targets], blend_heatmap=True,
-                       size=self.config['input_size'], save_dir=self.config['save_dir'],
-                       name=str(batch_idx)+'_%d.jpg'%self.current_epoch)
+        # if batch_idx < 30:
+        #     save_batch(impaths, images.cpu().numpy(), 
+        #                [tg.cpu().numpy() for tg in targets], blend_heatmap=True,
+        #                size=self.config['input_size'], save_dir=self.config['save_dir'],
+        #                name=str(batch_idx)+'_%d.jpg'%self.current_epoch)
         
         images = images.permute(0, 3, 1, 2) #transpose image to 3xHxC
         output = self.model(images)
@@ -164,9 +166,9 @@ if __name__ == '__main__':
     model = LightningModel(config, resizer=val_dataset.resizer)
 
     pbar = RichProgressBar(refresh_rate=1, leave=True)
-    ckpt = ModelCheckpoint(dirpath=config['save_dir'], filename='{epoch}_{mAP50:.2f}',
-                           monitor='mAP50', mode='max', save_last=True,
-                           every_n_epochs=config['save_period'])
+    ckpt = ModelCheckpoint(dirpath=config['save_dir'], filename='{epoch}_{mAP50:.3f}',
+                           monitor='mAP50', mode='max', save_last=True, save_top_k=3,
+                           every_n_epochs=1)
 
     trainer = pl.Trainer(max_epochs=config['epochs'], default_root_dir=config['save_dir'], profiler='simple',
                             accelerator="gpu", devices=config['gpu'],

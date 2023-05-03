@@ -102,15 +102,14 @@ class Backbone(nn.Module):
                 print('Cannot load yolov8%s backbone weights !'%version)
 
     def forward(self, inp):
-        assert inp.shape[1] == 3
         out_bb = {}
         x = inp
 
-        for i in range(16):
+        for i in range(22):
             # print(i)
             if i not in [11, 14, 17, 20]:
                 x = self.backbone[i](x)
-                if i in [4, 6, 9, 12, 15, 18]:
+                if i in [4, 6, 9, 12, 15, 18, 21]:
                     out_bb[i] = x
             elif i == 11:
                 x = self.backbone[i]((x, out_bb[6]))
@@ -121,8 +120,8 @@ class Backbone(nn.Module):
             elif i == 20:
                 x = self.backbone[i]((x, out_bb[9]))
                 
-                # 1/32     1/16         1/8         1/16
-        return out_bb[9], out_bb[12], out_bb[15]#, out_bb[18]
+                # 1/8     1/16         1/32      
+        return out_bb[15], out_bb[18], out_bb[21]
 
 class Neck(nn.Module):
     def __init__(self, in_channels=[64, 128, 256, 512],
@@ -130,60 +129,58 @@ class Neck(nn.Module):
         super().__init__()
         c = inner_channels // 3
         
+        self.up1 = nn.Upsample(scale_factor=8, mode='bilinear')
+        self.up2 = nn.Upsample(scale_factor=4, mode='bilinear')
+        self.up3 = nn.Upsample(scale_factor=2, mode='bilinear')
+        
         self.in1 = Conv(in_channels[2], c, k=1) #for layer21
         self.in2 = Conv(in_channels[1], c, k=1) #for layer18
         self.in3 = Conv(in_channels[0], c, k=1) #for layer15
 
-        self.concat_attention = ScaleFeatureSelection(inner_channels, c, 3, attention_type='scale_spatial')
+        self.concat_attention = ScaleFeatureSelection(inner_channels, c, 3, attention_type='scale_channel_spatial')
         
-        self.ia = ImplicitA(c*3, std=0.05)
-        self.ims = nn.ModuleList([ImplicitM(c, std=0.05) for i in range(3)])
+        self.ia = ImplicitA(c)
+        self.ims = nn.ModuleList([ImplicitM(c) for i in range(3)])
 
     def forward(self, features):
-        out9, out12, out15 = features
-        up1 = nn.Upsample(scale_factor=8)(out9)
-        up1 = self.in1(up1)
+        out15, out18, out21 = features
+        up1 = self.in1(self.up1(out21))
+        up2 = self.in2(self.up2(out18))
+        up3 = self.in3(self.up3(out15))
         
-        up2 = nn.Upsample(scale_factor=4)(out12)
-        up2 = self.in2(up2)
-
-        up3 = nn.Upsample(scale_factor=2)(out15)
-        up3 = self.in3(up3)
-        
-        fuse = torch.cat((self.ims[0](up1), self.ims[1](up2), self.ims[2](up3)), 1)
+        # fuse = torch.cat((self.ims[0](up1), self.ims[1](up2), self.ims[2](up3)), 1)
+        fuse = torch.cat((up3, up2, up1), 1)
         fuse = self.concat_attention(fuse, [up3, up2, up1])
-        # x = self.ims[0](up1) + self.ims[1](up2) + self.ims[2](up3)
-        fuse = self.ia(fuse)
+        # fuse = self.ims[0](up1) + self.ims[1](up2) + self.ims[2](up3)
+        # fuse = self.ia(fuse)
         return fuse
 
 class IHead(nn.Module):
     def __init__(self, c, nc=20) -> None:
         super().__init__()
-        self.ia, self.im = ImplicitA(c), ImplicitM(c)
-        self.conv1 = Conv(c, c, k=3, s=1)
-        self.conv2 = Conv(c, c, k=3, s=1)
-        self.conv3 = Conv(c, c, k=3, s=1)
+        # self.ia, self.im = ImplicitA(c), ImplicitM(c)
+        self.conv1 = Conv(c*3, c*3, k=3, s=1)
+        self.conv2 = Conv(c*3, c*2, k=3, s=1)
+        self.conv3 = Conv(c*2, c, k=3, s=1)
 
         self.hm_out = nn.Sequential(
-            Conv(c, c, 3, 1), self.ia,
-            Conv(c, c, 3, 1), self.im,
+            Conv(c, c, 3, 1), #self.ia,
+            Conv(c, c, 3, 1), #self.im,
             nn.Conv2d(c, nc, 1, bias=True),
             nn.Sigmoid()
         )
         self.hm_out[-2].bias.data.fill_(-4.6)
         
         self.wh_out = nn.Sequential(
-            Conv(c, c, 3, 1), self.ia,
-            Conv(c, c, 3, 1), self.im,
+            Conv(c, c, 3, 1), #self.ia,
+            Conv(c, c, 3, 1), #self.im,
             nn.Conv2d(c, 2, 1),
-            # nn.ReLU()
         )
 
         self.reg_out = nn.Sequential(
-            Conv(c, c, 3, 1), self.ia,
-            Conv(c, c, 3, 1), self.im,
+            Conv(c, c, 3, 1), #self.ia,
+            Conv(c, c, 3, 1), #self.im,
             nn.Conv2d(c, 2, 1),
-            # nn.Sigmoid()
         )
 
     def forward(self, x):
@@ -211,9 +208,9 @@ class Model(nn.Module):
         ch = [make_divisible(c_*gw, 8) for c_ in [64, 128, 256, 512, max_channels]] #16, 32, 64, 128, 256
 
         self.backbone = Backbone(version, is_training)
-        inner_channels = ch[1]*3
+        inner_channels = ch[2]*3
         self.neck = Neck(ch[2:], inner_channels)
-        self.head = IHead(inner_channels, nc)
+        self.head = IHead(ch[2], nc)
         
         self.is_training = is_training
         self.decoder = Decoder(max_boxes)        

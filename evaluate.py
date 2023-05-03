@@ -188,8 +188,8 @@ if __name__ == '__main__':
     from argparse import ArgumentParser
     import yaml
     from dataset.generator import Generator
-    # from model import Model
-    from model_2 import Model
+    from model import Model
+    # from model_2 import Model
 
     parser = ArgumentParser()
     parser.add_argument('--config', default='config/default.yaml')
@@ -209,7 +209,7 @@ if __name__ == '__main__':
     else:
         if args.device != '':
             cfg['gpu'] = args.device
-        device = torch.device('cuda:'+cfg['gpu']) if torch.cuda.is_available() else torch.device('cpu')
+        device = torch.device('cuda:'+str(cfg['gpu'][0])) if torch.cuda.is_available() else torch.device('cpu')
 
     ## Load data [Done]
     test_dataset = Generator(cfg, mode='test')
