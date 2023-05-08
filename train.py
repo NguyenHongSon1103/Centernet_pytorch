@@ -66,7 +66,7 @@ class LightningModel(pl.LightningModule):
         self.save_hyperparameters()
         self.model = Model(version=config['version'], nc=config['nc'], max_boxes=config['max_boxes'], is_training=True)
         self.config = config
-        self.loss_fn = Loss()
+        self.loss_fn = Loss(weights=[1.0, 0.2, 1.0]) #increase weights for regression
         self.resizer = resizer
         self.validation_step_outputs = []
         
@@ -133,7 +133,7 @@ class LightningModel(pl.LightningModule):
         label_path = os.path.join(config['save_dir'], 'val_labels.json')
         generate_coco_format_predict(total_output, pred_path)
         stats = evaluate(label_path, pred_path)
-        val_metrics = {'mAP50':stats[1], 'mAP50-95':stats[0]}
+        val_metrics = {'mAP50':stats[1], 'mAP5095':stats[0]}
         print('mAP@50    : %8.3f'%stats[1])
         print('mAP@50:95 : %8.3f'%stats[0])
         self.log_dict(val_metrics, prog_bar=False, on_step=False, on_epoch=True)
@@ -182,4 +182,4 @@ if __name__ == '__main__':
             ckpt_path = None
             print('Checkpoint %s not found !'%config['checkpoint'])
             
-    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=ckpt_path)

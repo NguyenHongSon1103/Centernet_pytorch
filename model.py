@@ -139,8 +139,8 @@ class Neck(nn.Module):
 
         self.concat_attention = ScaleFeatureSelection(inner_channels, c, 3, attention_type='scale_channel_spatial')
         
-        self.ia = ImplicitA(c)
-        self.ims = nn.ModuleList([ImplicitM(c) for i in range(3)])
+        # self.ia = ImplicitA(c*3)
+        # self.ims = nn.ModuleList([ImplicitM(c) for i in range(3)])
 
     def forward(self, features):
         out15, out18, out21 = features
@@ -169,7 +169,7 @@ class IHead(nn.Module):
             nn.Conv2d(c, nc, 1, bias=True),
             nn.Sigmoid()
         )
-        self.hm_out[-2].bias.data.fill_(-4.6)
+        self.hm_out[-2].bias.data.fill_(-2.19)
         
         self.wh_out = nn.Sequential(
             Conv(c, c, 3, 1), #self.ia,

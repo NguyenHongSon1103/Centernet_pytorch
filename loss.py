@@ -23,9 +23,9 @@ def _neg_loss(pred, gt):
     neg_weights = torch.pow(1 - gt, 4)
 
     loss = 0
-
-    pos_loss = torch.log(torch.clip(pred, 1e-4, 1. - 1e-4)) * torch.pow(1 - pred, 2) * pos_inds
-    neg_loss = torch.log(torch.clip(1 - pred, 1e-4, 1. - 1e-4)) * torch.pow(pred, 2) * neg_weights * neg_inds
+    pred = torch.clip(pred, 1e-4, 1.-1e-4)
+    pos_loss = torch.log(pred) * torch.pow(1 - pred, 2) * pos_inds
+    neg_loss = torch.log(1 - pred) * torch.pow(pred, 2) * neg_weights * neg_inds
 
     num_pos  = pos_inds.float().sum()
     pos_loss = pos_loss.sum()
@@ -220,15 +220,16 @@ class BalancedL1Loss(nn.Module):
         return loss
     
 class Loss(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, weights=[1.0, 0.1, 1.0]) -> None:
         super().__init__()
         self.hm_loss = FocalLoss()
         self.wh_loss = RegL1Loss()
         # self.wh_loss = RegLoss()
         self.reg_loss = RegLoss()
         self.loss_keys = ['hm_loss', 'wh_loss', 'reg_loss', 'total_loss']
+        self.weights = weights
     
-    def forward(self, output, target, weights=[1.0, 0.1, 1.0]):
+    def forward(self, output, target, ):
         '''
         output: 
                 hm: NxCxWxH | wh: Nx2xWxH | reg: Nx2xWxH
@@ -240,11 +241,11 @@ class Loss(nn.Module):
 
         indices = target[3].type(torch.int64)
         mask = target[3] > 0
-        hm_loss = self.hm_loss(output[0], target[0].permute(0, 3, 1, 2)) * weights[0]
-        wh_loss = self.wh_loss(output[1], mask, indices, target[1])*weights[1]
+        hm_loss = self.hm_loss(output[0], target[0].permute(0, 3, 1, 2)) * self.weights[0]
+        wh_loss = self.wh_loss(output[1], mask, indices, target[1])*self.weights[1]
         # wh_loss = self.wh_loss(output[0].shape[2], output[1], mask, indices, target[1]) #for ciou loss
         
-        reg_loss = self.reg_loss(output[2], mask, indices, target[2])*weights[2]
+        reg_loss = self.reg_loss(output[2], mask, indices, target[2])*self.weights[2]
 
         total_loss = hm_loss + wh_loss + reg_loss
         loss_dict = {key:value for key, value in zip(self.loss_keys, [hm_loss, wh_loss, reg_loss, total_loss])}

@@ -175,8 +175,12 @@ def test(model, test_loader, config, device):
     save_path = os.path.join(config['save_dir'], 'test_predictions.json')
     lb_path = os.path.join(config['save_dir'], 'test_labels.json')
     generate_coco_format_predict(test_step_outputs, save_path)
-    generate_coco_format(test_loader.dataset, os.path.join(cfg['save_dir'], 'test_labels.json'))
-
+    if not os.path.exists(lb_path):
+        print('Cannot found label json => generate new')
+        generate_coco_format(test_loader.dataset, os.path.join(cfg['save_dir'], 'test_labels.json'))
+    else:
+        print('Found label json => Using this exists !')
+        
     stats = evaluate_all(lb_path, save_path)
 
     return stats
