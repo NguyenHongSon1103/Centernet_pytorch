@@ -66,7 +66,7 @@ class LightningModel(pl.LightningModule):
         self.save_hyperparameters()
         self.model = Model(version=config['version'], nc=config['nc'], max_boxes=config['max_boxes'], is_training=True)
         self.config = config
-        self.loss_fn = Loss(weights=[1.0, 0.2, 1.0]) #increase weights for regression
+        self.loss_fn = Loss(weights=[1.0, 0.1, 1.0])
         self.resizer = resizer
         self.validation_step_outputs = []
         
@@ -170,8 +170,8 @@ if __name__ == '__main__':
                            monitor='mAP50', mode='max', save_last=True, save_top_k=3,
                            every_n_epochs=1)
 
-    trainer = pl.Trainer(max_epochs=config['epochs'], default_root_dir=config['save_dir'], profiler='simple',
-                            accelerator="gpu", devices=config['gpu'],
+    trainer = pl.Trainer(max_epochs=config['epochs'], default_root_dir=config['save_dir'], #profiler='simple',
+                            accelerator="gpu", devices=config['gpu'], precision='16-mixed',
                             callbacks=[pbar, ckpt])
     #Resume if needed
     if config['resume'] and config['checkpoint']:
@@ -181,5 +181,7 @@ if __name__ == '__main__':
         else:
             ckpt_path = None
             print('Checkpoint %s not found !'%config['checkpoint'])
+    else: 
+        ckpt_path = None
             
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=ckpt_path)

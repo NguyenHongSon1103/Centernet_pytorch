@@ -1,38 +1,37 @@
 #----------------------- 
 # Model architecture One of ['tiny', 's', 'm', 'l', 'x']
 #-----------------------
-
 version: 'n'
-
 #-----------------------
 # Data path
 #-----------------------
 nc : 2
 names : 
-  polyps : 0
+#  polyps : 0
   adenomatous : 0
   hyperplastic : 1
   
-# test: /home/s/sonnh/polyp_data/test/images
-train : D:/VNG/E2EObjectDetection/PolypsSet_converted/train2019/images
-val :  D:/VNG/E2EObjectDetection/PolypsSet_converted/val2019/images
+train : '/data/sonnh8/ObjectDetectionMethods/PolypsSet/train2019/images'
+val : '/data/sonnh8/ObjectDetectionMethods/PolypsSet/val2019/images'
+test: '/data/sonnh8/ObjectDetectionMethods/PolypsSet/test2019/images'
+
 #-----------------------
 # Training configs
 #-----------------------
-gpu : '0'
+gpu : [1] #[0] if want to use only gpu 0
 input_size : 640
 batch_size : 16
 epochs : 100
-optimizer :
-  type : Adam
-  base_lr : 0.001 #1e-3
+optimizer : 
+  type : AdamW #Adam, AdamW or Lion
+  base_lr : 0.001 #1e-3 with Adam, AdamW and 1e-4 with Lion
   end_lr : 0.00001 #1e-5
-  warmup_lr : 0.00002 #2e-5
-  warmup_steps : 10000
+  # warmup_lr : 0.00002 #2e-5
+  # warmup_steps : 10000
 
 max_boxes : 100
-save_dir : 'save_dir/test'
-save_period: 5
+save_dir : 'save_dir/polypsset_20230509'
+save_top_k: 3
 resume : False
 resume_checkpoint : ''
 
@@ -40,26 +39,35 @@ resume_checkpoint : ''
 # Augmentation config
 #-----------------------
             
-spatial: 
-    keep: 0.5 # prob for keep original images
-    crop: 0.2 # prob for BBoxSafeRandomCrop
-    scale_x: [0.5, 1.5] #ratio for x axis 
-    scale_y: [0.5, 1.5] #ratio for y axis
-    keep_ratio: False #keep original ratio or not
-    translate_x: 0 # ratio for x axis
-    translate_y: 0 # ratio for y axis
-    rotate: 5 # +/- degree 
-    shear: 0 # +/- degree
-    hflip: 0.2 # prob for horizontal flip
-    vflip: 0.2 # prob for vertical flip
+augment: 
+    keep: 0.0 # prob for keep original images
+    crop: 1 # prob for BBoxSafeRandomCrop
+    affine:
+        prob: 1
+        scale_x: [0.5, 1.5] #ratio for x axis 
+        scale_y: [0.5, 1.5] #ratio for y axis
+        keep_ratio: False #keep original ratio or not
+        translate_x: [-0.1, 0.1] # ratio for x axis
+        translate_y: [-0.1, 0.1] # ratio for y axis
+        shear: 5 # +/- degree
+        
+    rotate: # +/- degree 
+        prob: 1
+        degree: 5
+        
+    hflip: 1 # prob for horizontal flip
+    vflip: 1 # prob for vertical flip
 
-visual: # all prob
-    keep: 0.5
-    color_jiiter: 0.2 
-    blur: 0.1
-    image_compression: 0.1
-    gray: 0.1
+    color_jitter:
+        prob: 1
+        brightness: 0.2
+        contrast: 0.2
+        saturation: 0.2
+        hue: 0.2
+        
+    blur: 1
+    image_compression: 1
+    gray: 1
     
 advanced: #all prob
-    keep: 0.5
-    mosaic: 0.0
+    keep: 0.0

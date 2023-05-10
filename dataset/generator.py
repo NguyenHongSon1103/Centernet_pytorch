@@ -7,14 +7,14 @@ import math
 import numpy as np
 import sys
 sys.path.append(os.getcwd())
-from .augmenter import VisualAugmenter, SpatialAugmenter, AdvancedAugmenter
-from .old_augmenter import OldTransformer
+from .augmenter import Augmenter, AdvancedAugmenter
 from .assigner import Assigner
 from copy import deepcopy
 from utils import parse_xml, check_is_image, Resizer, colorstr
 from tqdm import tqdm
 from PIL import Image
 import logging
+from time import time
 
 LOGGER = logging.getLogger()
 LOGGER.setLevel(logging.INFO)
@@ -107,7 +107,6 @@ class Generator(Dataset):
         self.img_dirs = hparams[mode]
         self.batch_size = hparams['batch_size']
         self.input_size = hparams['input_size']
-        # self.resizer = Resizer(self.input_size, mode='letterbox')
         self.resizer = Resizer(self.input_size, mode='keep')
         self.stride = 4
         self.max_objects = hparams['max_boxes']
@@ -121,12 +120,9 @@ class Generator(Dataset):
         self.assigner = Assigner(self.num_classes, self.input_size, self.stride, self.max_objects)
 
         ## New aumgenter
-        self.visual_augmenter = VisualAugmenter(hparams['visual'])
-        self.misc_augmenter = SpatialAugmenter(hparams['spatial'])
+        self.augmenter = Augmenter(hparams['augment'])
         self.advanced_augmenter = AdvancedAugmenter(self, hparams['advanced'])
-        
-        # self.old_transformer = OldTransformer()
-                
+                        
     def on_epoch_end(self):
         np.random.shuffle(self.data)
     
@@ -150,16 +146,17 @@ class Generator(Dataset):
         item = self.load_item(d)
         ##Augmentation
         if self.mode == 'train':
+            # s = time()
             src_item = deepcopy(item)
             # if self.advanced_augmenter is not None:
             src_item = self.advanced_augmenter(src_item)
-            src_item = self.misc_augmenter(src_item) 
+            src_item = self.augmenter(src_item) 
             #bug: Lost box after spatial transform, happen a few time
             #still not know which transformation caused this
             if len(src_item['boxes']) > 0:
                 item = src_item
-            item = self.visual_augmenter(item)
-
+            # print('augment time: ', time()-s)
+                
         h, w = item['image'].shape[:2]
         item['image'] = cv2.cvtColor(item['image'], cv2.COLOR_BGR2RGB)
         item['image'] = self.resizer.resize_image(item['image'])

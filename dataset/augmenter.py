@@ -5,57 +5,38 @@ import cv2
 import numpy as np
 import os
     
-class VisualAugmenter:
-    def __init__(self, visual_cfg):
-        self.p = visual_cfg['keep']
-        T = [
-            A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2, p=visual_cfg['color_jiiter']),
-            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.2),
-            A.RandomGamma(gamma_limit=(80, 120), p=0.2),
-            A.CLAHE(p=0.2),
-            A.OneOf([
-                A.Blur(p=0.3),
-                A.GaussianBlur(p=0.4),
-                A.MedianBlur(p=0.3)
-            ], p=visual_cfg['blur']),
-            A.ImageCompression(quality_lower=75, quality_upper=100, p=visual_cfg['image_compression']),
-            A.ToGray(p=visual_cfg['gray'])
-        ]
-        self.transform = A.Compose(T, p=1.0)
-    
-    def __call__(self, data):
+class Augmenter:
+    def __init__(self, config):
         '''
-        data: a dictionari with {'image': image, 'boxes': boxes, 'class_ids':class_ids}
-        '''
-        ## Keep self.keep_prob original image
-        if np.random.random() < self.p:
-            return data
-        res = self.transform(image=data['image'])['image']
-        augmented_data = deepcopy(data)
-        augmented_data['image'] = res
-        return augmented_data
-    
-class SpatialAugmenter:
-    def __init__(self, spatial_config):
-        '''
-        Spatial augmentation
+        augmentation
         Note: use rotate in affine cause lost box, use safe rotate instead
         '''
-        self.p = spatial_config['keep']
+        self.p = config['keep']
+        
+        affine = config['affine']
+        rotate = config['rotate']
+        jitter = config['color_jitter']
         
         T = [
-            # A.BBoxSafeRandomCrop(erosion_rate=0.2, p=spatial_config['crop']),
-            A.RandomSizedBBoxSafeCrop(640, 640, 0, p=spatial_config['crop']),
-            A.Affine(scale={'x':spatial_config['scale_x'], 'y':spatial_config['scale_y']},
-                    keep_ratio=spatial_config['keep_ratio'],
-                    translate_percent={'x':spatial_config['translate_x'], 'y':spatial_config['translate_y']},
-                    rotate=None,
-                    shear=spatial_config['shear'], p=0.2),
-            A.SafeRotate (limit=spatial_config['rotate'], border_mode=cv2.BORDER_CONSTANT,
-                          value=0, p=0.2),
-            A.HorizontalFlip(p=spatial_config['hflip']),
-            A.VerticalFlip(p=spatial_config['vflip'])
+            #Spatial
+            A.RandomSizedBBoxSafeCrop(640, 640, 0, p=config['crop']),
+            A.Affine(scale={'x':affine['scale_x'], 'y':affine['scale_y']},
+                    keep_ratio=affine['keep_ratio'],
+                    translate_percent={'x':affine['translate_x'], 'y':affine['translate_y']},
+                    rotate=None, shear=affine['shear'], p=affine['prob']),
+            A.SafeRotate (limit=rotate['degree'], border_mode=cv2.BORDER_CONSTANT,
+                          value=0, p=rotate['prob']),
+            A.HorizontalFlip(p=config['hflip']),
+            A.VerticalFlip(p=config['vflip']),
+            
+            #Visual
+            A.ColorJitter(brightness=jitter['brightness'], contrast=jitter['contrast'],
+                          saturation=jitter['saturation'], hue=jitter['hue'], p=jitter['prob']),
+            A.MotionBlur(p=config['blur']),
+            A.ImageCompression(quality_lower=75, quality_upper=100, p=config['image_compression']),
+            A.ToGray(p=config['gray'])
         ]
+    
         self.transform = A.Compose(T, bbox_params=A.BboxParams(format='pascal_voc'))
     
     def __call__(self, data):
@@ -73,19 +54,6 @@ class SpatialAugmenter:
         augmented_data['boxes'] = [box[:4] for box in res['bboxes']]
         augmented_data['class_ids'] = [box[4] for box in res['bboxes']]
         return augmented_data
-
-def resize(image, boxes, size):
-    w, h = size
-    ih, iw = image.shape[:2]
-    scale_w, scale_h = w/iw, h/ih
-    new_image = cv2.resize(image, (w, h))
-    new_boxes = []
-    for box in boxes:
-        xmin, ymin, xmax, ymax = box[:4]
-        xmin, xmax = int(xmin*scale_w), int(xmax*scale_w)
-        ymin, ymax = int(ymin*scale_h), int(ymax*scale_h)
-        new_boxes.append([xmin, ymin, xmax, ymax, box[4]])
-    return new_image, new_boxes
 
 def merge_bboxes(bboxes, cutx, cuty):
     merge_bbox = []
@@ -133,13 +101,9 @@ def merge_bboxes(bboxes, cutx, cuty):
             merge_bbox.append(tmp_box)
     return merge_bbox
 
-def rand(a=0, b=1):
-    return np.random.rand()*(b-a) + a
-
 class AdvancedAugmenter:
     def __init__(self, dataset, advanced_config, target_size=(640, 640)):
         self.p = advanced_config['keep'] #all prob
-        self.mosaic_prob = advanced_config['mosaic']
         self.target_size= target_size
         self.dataset = dataset #list
     

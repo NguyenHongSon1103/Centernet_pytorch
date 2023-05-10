@@ -119,7 +119,11 @@ class Backbone(nn.Module):
                 x = self.backbone[i]((x, out_bb[12]))
             elif i == 20:
                 x = self.backbone[i]((x, out_bb[9]))
-                
+        
+        del out_bb[4]
+        del out_bb[6]
+        del out_bb[9]
+        del out_bb[12]
                 # 1/8     1/16         1/32      
         return out_bb[15], out_bb[18], out_bb[21]
 
@@ -129,9 +133,9 @@ class Neck(nn.Module):
         super().__init__()
         c = inner_channels // 3
         
-        self.up1 = nn.Upsample(scale_factor=8, mode='bilinear')
-        self.up2 = nn.Upsample(scale_factor=4, mode='bilinear')
-        self.up3 = nn.Upsample(scale_factor=2, mode='bilinear')
+        self.up1 = nn.Upsample(scale_factor=8)
+        self.up2 = nn.Upsample(scale_factor=4)
+        self.up3 = nn.Upsample(scale_factor=2)
         
         self.in1 = Conv(in_channels[2], c, k=1) #for layer21
         self.in2 = Conv(in_channels[1], c, k=1) #for layer18
