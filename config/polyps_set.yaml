@@ -1,5 +1,5 @@
 #----------------------- 
-# Model architecture One of ['tiny', 's', 'm', 'l', 'x']
+# Model architecture One of ['n', 's', 'm', 'l', 'x']
 #-----------------------
 version: 'n'
 #-----------------------
@@ -23,14 +23,14 @@ input_size : 640
 batch_size : 16
 epochs : 100
 optimizer : 
-  type : Adam #Adam, AdamW or Lion
+  type : AdamW #Adam, AdamW or Lion
   base_lr : 0.001 #1e-3 with Adam, AdamW and 1e-4 with Lion
   end_lr : 0.00001 #1e-5
   # warmup_lr : 0.00002 #2e-5
   # warmup_steps : 10000
 
 max_boxes : 100
-save_dir : 'save_dir/polypsset_1class_20230510'
+save_dir : 'save_dir/polypsset_1class_20230511'
 save_top_k: 3
 resume : False
 resume_checkpoint : ''
@@ -43,13 +43,13 @@ augment:
     keep: 0.7 # prob for keep original images
     crop: 0.2 # prob for BBoxSafeRandomCrop
     affine:
-        prob: 0.3
+        prob: 0.2
         scale_x: [0.5, 1.5] #ratio for x axis 
         scale_y: [0.5, 1.5] #ratio for y axis
         keep_ratio: False #keep original ratio or not
-        translate_x: [-0.1, 0.1] # ratio for x axis
-        translate_y: [-0.1, 0.1] # ratio for y axis
-        shear: 5 # +/- degree
+        translate_x: 0 # ratio for x axis
+        translate_y: 0 # ratio for y axis
+        shear: 0 # +/- degree
         
     rotate: # +/- degree 
         prob: 0.2
@@ -70,4 +70,4 @@ augment:
     gray: 0.0
     
 advanced: #all prob
-    keep: 1.0
+    keep: 0.8

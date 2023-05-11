@@ -160,7 +160,6 @@ def test(model, test_loader, config, device):
 
     for batch_idx, (images, _, impaths) in pbar:
         images = images.permute(0, 3, 1, 2).to(device) #transpose image to 3xHxC
-
         with torch.no_grad():
             predictions = model(images).cpu().numpy()
             # predictions = model.decoder(out).cpu().numpy() #Nx100x6

@@ -133,9 +133,9 @@ class Neck(nn.Module):
         super().__init__()
         c = inner_channels // 3
         
-        self.up1 = nn.Upsample(scale_factor=8)
-        self.up2 = nn.Upsample(scale_factor=4)
-        self.up3 = nn.Upsample(scale_factor=2)
+        self.up1 = nn.Upsample(scale_factor=8, mode='bilinear')
+        self.up2 = nn.Upsample(scale_factor=4, mode='bilinear')
+        self.up3 = nn.Upsample(scale_factor=2, mode='bilinear')
         
         self.in1 = Conv(in_channels[2], c, k=1) #for layer21
         self.in2 = Conv(in_channels[1], c, k=1) #for layer18
@@ -173,7 +173,7 @@ class IHead(nn.Module):
             nn.Conv2d(c, nc, 1, bias=True),
             nn.Sigmoid()
         )
-        self.hm_out[-2].bias.data.fill_(-2.19)
+        self.hm_out[-2].bias.data.fill_(-4.6)
         
         self.wh_out = nn.Sequential(
             Conv(c, c, 3, 1), #self.ia,

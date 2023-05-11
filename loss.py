@@ -223,8 +223,8 @@ class Loss(nn.Module):
     def __init__(self, weights=[1.0, 0.1, 1.0]) -> None:
         super().__init__()
         self.hm_loss = FocalLoss()
-        self.wh_loss = RegL1Loss()
-        # self.wh_loss = RegLoss()
+        # self.wh_loss = RegL1Loss()
+        self.wh_loss = RegLoss()
         self.reg_loss = RegLoss()
         self.loss_keys = ['hm_loss', 'wh_loss', 'reg_loss', 'total_loss']
         self.weights = weights

@@ -19,7 +19,8 @@ class Augmenter:
         
         T = [
             #Spatial
-            A.RandomSizedBBoxSafeCrop(640, 640, 0, p=config['crop']),
+            A.BBoxSafeRandomCrop(0.0, p=config['crop']),
+            # A.RandomSizedBBoxSafeCrop(640, 640, 0, p=config['crop']),
             A.Affine(scale={'x':affine['scale_x'], 'y':affine['scale_y']},
                     keep_ratio=affine['keep_ratio'],
                     translate_percent={'x':affine['translate_x'], 'y':affine['translate_y']},
@@ -32,7 +33,8 @@ class Augmenter:
             #Visual
             A.ColorJitter(brightness=jitter['brightness'], contrast=jitter['contrast'],
                           saturation=jitter['saturation'], hue=jitter['hue'], p=jitter['prob']),
-            A.MotionBlur(p=config['blur']),
+            # A.MotionBlur(p=config['blur']),
+            A.GaussianBlur(p=config['blur']),
             A.ImageCompression(quality_lower=75, quality_upper=100, p=config['image_compression']),
             A.ToGray(p=config['gray'])
         ]
@@ -184,82 +186,5 @@ class AdvancedAugmenter:
         augmented_data['boxes'] = [box[:4] for box in new_boxes]
         augmented_data['class_ids'] = [box[4] for box in new_boxes]
         return augmented_data
-
-if __name__ == '__main__':
-    im_path = r"D:\VNG\E2EObjectDetection\PolypsSet\train2019\Image"
-    lb_path = r"D:\VNG\E2EObjectDetection\PolypsSet\train2019\Annotation"
-    import xml.etree.ElementTree as ET
-    from time import time
-    NAME2IDX = {'hyperplastic':0, 'adenomatous':1}
-    IDX2NAME = ['hyperplastic', 'adenomatous']
-    def parse_xml(xml):
-        root = ET.parse(xml).getroot()
-        objs = root.findall('object')
-        boxes, ymins, obj_names = [], [], []
-        for obj in objs:
-            obj_name = obj.find('name').text
-            box = obj.find('bndbox')
-            xmin = float(box.find('xmin').text)
-            ymin = float(box.find('ymin').text)
-            xmax = float(box.find('xmax').text)
-            ymax = float(box.find('ymax').text)
-            ymins.append(ymin)
-            boxes.append([xmin, ymin, xmax, ymax])
-            obj_names.append(obj_name)
-        indices = np.argsort(ymins)
-        boxes = [boxes[i] for i in indices]
-        obj_names = [obj_names[i] for i in indices]
-        return boxes, obj_names
-
-    def show(image, boxes, name='im'):
-        for box in boxes:
-            xmin, ymin, xmax, ymax = [int(p) for p in box[:4]]
-            label = box[4]
-            ret, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            cv2.rectangle(image, (xmin, ymin), (xmax, ymax), (0, 255, 0), 1)
-            cv2.rectangle(image, (xmin, ymax - ret[1] - baseline), (xmin + ret[0], ymax), (0, 255, 0), -1)
-            cv2.putText(image, label, (xmin, ymax - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-        
-        cv2.imshow(name, image)
-
-    visual = VisualAugmenter(keep_prob=0.3)
-    misc = MiscAugmenter(keep_prob=0.3)
-    advanced = AdvancedAugmenter(keep_prob=0.5)
-    im_names = os.listdir(im_path)
-    for im_name in im_names:
-        fp = os.path.join(im_path, im_name)
-        xp = os.path.join(lb_path, im_name[:-3] + 'xml')
-        if not os.path.exists(xp):
-            continue
-        boxes, names = parse_xml(xp)
-        class_ids = [NAME2IDX[name] for name in names]
-        img = cv2.imread(fp)
-        ## samples 3 more data
-        list_data = [{'image':img, 'boxes':boxes, 'class_ids':class_ids}]
-        while len(list_data) != 4:
-            
-            temp_name = np.random.choice(im_names)
-            fp = os.path.join(im_path, temp_name)
-            xp = os.path.join(lb_path, temp_name[:-3] + 'xml')
-
-            if not os.path.exists(xp):
-                continue
-            img = cv2.imread(fp)
-            boxes, names = parse_xml(xp)
-            list_data.append({'image':img, 'boxes':boxes, 'class_ids':class_ids})
-        
-        item_res = advanced(list_data)
-        item_res = visual(item_res)
-        # item_res = visual({'image':img, 'boxes':boxes, 'class_ids':class_ids})
-        item_res = misc(item_res)
-        # item_res = misc({'image':img, 'boxes':boxes, 'class_ids':class_ids})
-        print(list_data[-1]['boxes'], list_data[-1]['class_ids'])
-        print(item_res['boxes'], item_res['class_ids'])
-        show(item_res['image'], [list(box) + [IDX2NAME[c]] for box, c in zip(item_res['boxes'], item_res['class_ids'])], 'transformed')
-        show(img, [box + [c] for box, c in zip(boxes, names)], 'original')
-        
-        key = cv2.waitKey(0)
-        if key == ord('q'):
-            exit()
 
 
