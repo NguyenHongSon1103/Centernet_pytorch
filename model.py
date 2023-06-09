@@ -173,6 +173,7 @@ class IHead(nn.Module):
             nn.Conv2d(c, nc, 1, bias=True),
             nn.Sigmoid()
         )
+        
         self.hm_out[-2].bias.data.fill_(-4.6)
         
         self.wh_out = nn.Sequential(
@@ -186,7 +187,7 @@ class IHead(nn.Module):
             Conv(c, c, 3, 1), #self.im,
             nn.Conv2d(c, 2, 1),
         )
-
+        
     def forward(self, x):
         x = self.conv3(self.conv2(self.conv1(x)))
         
@@ -197,7 +198,7 @@ class IHead(nn.Module):
         return out_hm, out_wh, out_reg
 
 class Model(nn.Module):
-    def __init__(self, version='n', nc=80, max_boxes= 100, is_training=True):
+    def __init__(self, version='n', nc=80, max_boxes= 100, is_training=True, load_pretrained=True):
         super().__init__()
         self.version = version
         scales = dict(
@@ -211,10 +212,16 @@ class Model(nn.Module):
         gd, gw, max_channels = scales[version]
         ch = [make_divisible(c_*gw, 8) for c_ in [64, 128, 256, 512, max_channels]] #16, 32, 64, 128, 256
 
-        self.backbone = Backbone(version, is_training)
-        inner_channels = ch[2]*3
-        self.neck = Neck(ch[2:], inner_channels)
-        self.head = IHead(ch[2], nc)
+        self.backbone = Backbone(version, load_pretrained)
+        
+        if version in ['n', 's']:
+            inner_channels = ch[2]*3
+            self.neck = Neck(ch[2:], inner_channels)
+            self.head = IHead(ch[2], nc)
+        else:
+            inner_channels = ch[1]*3
+            self.neck = Neck(ch[2:], inner_channels)
+            self.head = IHead(ch[1], nc)
         
         self.is_training = is_training
         self.decoder = Decoder(max_boxes)        

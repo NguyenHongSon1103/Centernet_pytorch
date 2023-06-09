@@ -71,7 +71,6 @@ def test_backward():
     from model import Model, Backbone
     loss_fn = Loss()
     
-    bs = 
     hm_label = np.random.random((2, 2, 160, 160)).astype('float32')
     hm_label = torch.from_numpy(hm_pred).to(device)
 
@@ -148,8 +147,33 @@ def test_generator():
             break
     print("Avg time per batch: ", mean_time/20)
 
+def test_semi_generator():
+    from SSOD.dataset import Generator
+    from torch.utils.data import DataLoader
+
+    with open('config/polyps_set_partial.yaml') as f:
+        cfg = yaml.safe_load(f)
+    
+    train_dataset = Generator(cfg, mode='train')
+    val_dataset   = Generator(cfg, mode='val')
+    train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=16, num_workers=8)
+    val_loader    = DataLoader(val_dataset, batch_size=16, num_workers=8)
+
+    # val_dataset.generate_coco_format('val_labels.json')
+    mean_time = 0
+    s = time()
+    for batch_idx, (unsup_weak_images, unsup_strong_images, images, targets) in enumerate(train_loader):
+        print(batch_idx, unsup_weak_images.shape, unsup_strong_images.shape, images.shape)
+        t = time()
+        print('load batch time: ', t-s)
+        mean_time += t-s 
+        s = t
+        if batch_idx == 20: 
+            break
+    print("Avg time per batch: ", mean_time/20)
+
 if __name__ == '__main__':
-    test_backward()
+    test_semi_generator()
     # test_generator()
     # test_model() 
     # test_loss()

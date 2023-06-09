@@ -7,8 +7,7 @@ import math
 import numpy as np
 import sys
 sys.path.append(os.getcwd())
-from .augmenter import VisualAugmenter, SpatialAugmenter, AdvancedAugmenter
-from .old_augmenter import OldTransformer
+from .augmentations import WeakAug, StrongAug, AdvancedAugmenter
 from .assigner import Assigner
 from copy import deepcopy
 from utils import parse_xml, check_is_image, Resizer, colorstr
@@ -95,64 +94,6 @@ def load_data(img_dirs, mode='train'):
     LOGGER.info(f'New cache created: {cache_path}')
     return data
 
-def load_unsup_data(img_dirs):
-    '''
-    Default: each set contains 2 folder: images and annotations
-    '''
-    if isinstance(img_dirs, str):
-        img_dirs = [img_dirs]
-
-    image_paths = []
-    for img_dir in img_dirs:
-        for name in tqdm(os.listdir(img_dir)):
-            if not check_is_image(name):
-                continue
-            image_paths.append(os.path.join(img_dir,  name))
-    return image_paths
-
-'''
-Train: 
-    each batch contains: sup: (image_strong +label) and  (image_weak + label)
-                         unsup: image_strong and image_weak
-Val: image + label
-'''
-
-class UnsupGenerator(Dataset):
-    def __init__(self, hparams, mode='train'):
-        """
-        Centernet dataset
-
-        Args:
-            data: dictionary with 2 keys: 'im_path' and 'lb_path'
-            hparams: a config dictionary
-        """
-        self.batch_size = hparams['batch_size']
-        self.input_size = hparams['input_size']
-        self.resizer = Resizer(self.input_size, mode='keep')
-
-        self.unsup_data = load_unsup_data(hparams['train_unsup'])
-        
-        self.weak_augmenter = WeakAug(multi_scale_prob=0.5, rotate_prob=0.05, flip_prob=0.5)
-        self.strong_augmenter = StrongAug()
-    
-    def __len__(self):
-        return len(self.unsup_data)
-    
-    def __getitem__(self, idx):
-        unsup_img = cv2.imread(self.unsup_data[idx])
-        
-        unsup_weak_img = self.weak_augmenter(unsup_img, None)
-        unsup_strong_img = self.strong_augmenter(unsup_weak_img)
-        
-        h, w = unsup_weak_img.shape[:2]
-        unsup_weak_img = cv2.cvtColor(unsup_weak_img, cv2.COLOR_BGR2RGB)
-        unsup_strong_img = cv2.cvtColor(unsup_strong_img, cv2.COLOR_BGR2RGB)
-        
-        unsup_weak_img = self.resizer.resize_image(unsup_weak_img).astype('float32') / 255.0
-        unsup_strong_img = self.resizer.resize_image(unsup_strong_img).astype('float32') / 255.0
-
-        return unsup_weak_img, unsup_strong_img
-
 class Generator(Dataset):
     def __init__(self, hparams, mode='train'):
         """
@@ -163,8 +104,8 @@ class Generator(Dataset):
             hparams: a config dictionary
         """
         self.batch_size = hparams['batch_size']
+        self.unsup_batch_size = hparams['unsup_batch_size']
         self.input_size = hparams['input_size']
-        # self.resizer = Resizer(self.input_size, mode='letterbox')
         self.resizer = Resizer(self.input_size, mode='keep')
         self.stride = 4
         self.max_objects = hparams['max_boxes']
@@ -175,14 +116,36 @@ class Generator(Dataset):
         os.makedirs(self.save_dir, exist_ok=True)
 
         self.data = load_data(hparams[mode], self.mode)
+            
+        if self.mode == 'train':
+            np.random.seed(12345)
+            np.random.shuffle(self.data)
+            split_idx = int(len(self.data) * float(hparams['partial'])) #1%, 5%, 10%
+            self.unsup_data = self.data[split_idx:]
+            self.data = self.data[:split_idx]
+            
+            # self.unsup_data = load_unsup_data(hparams['train_unsup'])
         
         self.assigner = Assigner(self.num_classes, self.input_size, self.stride, self.max_objects)
 
-        self.weak_augmenter = WeakAug(multi_scale_prob=0.5, rotate_prob=0.05, flip_prob=0.5)
-        self.strong_augmenter = StrongAug()
+        self.weak_augmenter = WeakAug(hparams['augment'])
+        self.strong_augmenter = StrongAug(hparams['augment'])
+        self.advanced_augmenter = AdvancedAugmenter(self, hparams['advanced'])
+        
+        #disable random crop, auto apply augment
+        hparams['augment']['keep'] = 0.0
+        hparams['augment']['crop'] = 0.0
+        self.unsup_weak_augmenter = WeakAug(hparams['augment'])
+        
+        hparams['augment']['color_jitter']['prob'] = 0.8
+        hparams['augment']['blur'] = 0.5
+        hparams['augment']['gray'] = 0.2
+        self.unsup_strong_augmenter = StrongAug(hparams['augment'])
                         
     def on_epoch_end(self):
         np.random.shuffle(self.data)
+        if self.mode == 'train':
+            np.random.shuffle(self.unsup_data)
     
     def load_item(self, d):
         image = cv2.imread(d['im_path'])
@@ -197,10 +160,12 @@ class Generator(Dataset):
         return item
     
     def __len__(self):
+        if self.mode == 'train':
+            return len(self.unsup_data)
         return len(self.data)
     
     def __getitem__(self, idx):
-        d = self.data[idx]
+        d = self.data[idx%len(self.data)]
         item = self.load_item(d)
         
         if self.mode != 'train':
@@ -211,22 +176,45 @@ class Generator(Dataset):
 
             item['image'] = item['image'].astype('float32') / 255.0
 
-            hm, wh, reg, indices = self.assigner(item['boxes'], item['class_ids'])
+            # hm, wh, reg, indices = self.assigner(item['boxes'], item['class_ids'])
 
-            return item['image'], (hm, wh, reg, indices), d['im_path']
+            return item['image'], d['im_path']
         
-        sup_weak_img, boxes = self.weak_augmenter(item['image'], item['boxes'])
+        #Supervised
+        item = self.advanced_augmenter(item)
+        item = self.weak_augmenter(item)
+        sup_weak_img, boxes, class_ids = item['image'], item['boxes'], item['class_ids']
         sup_strong_img = self.strong_augmenter(sup_weak_img)
         
-        h, w = sup_weak_img.shape[:2]
-        sup_weak_img = cv2.cvtColor(sup_weak_img, cv2.COLOR_BGR2RGB)
+        h, w = sup_strong_img.shape[:2]
+        # sup_weak_img = cv2.cvtColor(sup_weak_img, cv2.COLOR_BGR2RGB)
         sup_strong_img = cv2.cvtColor(sup_strong_img, cv2.COLOR_BGR2RGB)
         
-        sup_weak_img = self.resizer.resize_image(sup_weak_img).astype('float32') / 255.0
+        # sup_weak_img = self.resizer.resize_image(sup_weak_img).astype('float32') / 255.0
         sup_strong_img = self.resizer.resize_image(sup_strong_img).astype('float32') / 255.0
         
         boxes = self.resizer.resize_boxes(boxes, (h, w)) #640x640
 
         hm, wh, reg, indices = self.assigner(boxes, item['class_ids'])
+        
+        #Unsupervised
+        unsup_weak_images, unsup_strong_images = [], []
+        for i in range(self.unsup_batch_size//self.batch_size):
+            sample = np.random.choice(self.unsup_data)
+            unsup_img = cv2.imread(sample['im_path'])
 
-        return sup_weak_img, sup_strong_img, (hm, wh, reg, indices), d['im_path']
+            weak_item = {'image':unsup_img, 'boxes':[], 'class_ids':[]}
+            unsup_weak_img = self.unsup_weak_augmenter(weak_item)['image']
+            unsup_strong_img = self.unsup_strong_augmenter(unsup_weak_img.copy())
+
+            h, w = unsup_weak_img.shape[:2]
+            unsup_weak_img = cv2.cvtColor(unsup_weak_img, cv2.COLOR_BGR2RGB)
+            unsup_strong_img = cv2.cvtColor(unsup_strong_img, cv2.COLOR_BGR2RGB)
+
+            unsup_weak_img = self.resizer.resize_image(unsup_weak_img).astype('float32') / 255.0
+            unsup_strong_img = self.resizer.resize_image(unsup_strong_img).astype('float32') / 255.0
+            
+            unsup_weak_images.append(unsup_weak_img)
+            unsup_strong_images.append(unsup_strong_img)
+
+        return unsup_weak_images, unsup_strong_images, sup_strong_img, (hm, wh, reg, indices)

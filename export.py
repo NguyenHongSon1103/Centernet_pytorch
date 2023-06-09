@@ -26,14 +26,18 @@ if args.device == '-1':
 else:
     if args.device != '':
         cfg['gpu'] = args.device
-    device = torch.device('cuda:'+cfg['gpu']) if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device('cuda:%d'%cfg['gpu'][0]) if torch.cuda.is_available() else torch.device('cpu')
 
 # ## Load model
 model = Model(version=cfg['version'], nc=cfg['nc'], max_boxes=cfg['max_boxes'], is_training=False)
-model.load_state_dict(torch.load(args.weights)['state_dict'], strict=False)
-print('Load successfully from checkpoint: %s'%args.weights)
+model_weights = torch.load(args.weights, map_location='cpu')['state_dict']
+print('Successfully load weights from ', args.weights)
+for key in list(model_weights):
+    model_weights[key.replace("model.", "")] = model_weights.pop(key)
+model.load_state_dict(model_weights, strict=True)
 model.eval()
-# model.to(device)
+model.fuse()
+print('Load successfully from checkpoint: %s'%args.weights)
 
 def get_latest_opset():
     # Return max supported ONNX opset by this version of torch
@@ -42,7 +46,7 @@ def get_latest_opset():
 torch.onnx.export(
             model,  # --dynamic only compatible with cpu
             torch.zeros((1, 3, 640, 640)),
-            os.path.join(args.weights.replace('.pth', '.onnx')) ,
+            os.path.join(args.weights.replace('.ckpt', '.onnx')) ,
             verbose=False,
             opset_version=get_latest_opset(),
             do_constant_folding=True,  # WARNING: DNN inference with torch>=1.12 may require do_constant_folding=False
@@ -62,13 +66,12 @@ providers = [
 ]
 
 sess_options = onnxruntime.SessionOptions()
-sess_options.enable_profiling = True
-session = onnxruntime.InferenceSession(args.weights.replace('.pth', '.onnx'), providers=providers, sess_options=sess_options)
+sess_options.enable_profiling = False
+session = onnxruntime.InferenceSession(args.weights.replace('.ckpt', '.onnx'), providers=providers, sess_options=sess_options)
 session.get_modelmeta()
 input_name = session.get_inputs()[0].name
 output_name = session.get_outputs()[0].name
 
-pdb.set_trace()
 #infer by onnx
 output = session.run([], {input_name:np.random.random((1, 3, 640, 640)).astype('float32')})
 output = np.array(output) 

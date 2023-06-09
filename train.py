@@ -1,63 +1,18 @@
 import torch
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 import numpy as np
 import os
 from argparse import ArgumentParser
 import yaml
 from PIL import Image
 from dataset.generator import Generator
-# from model_2 import Model
 from model import Model
 from loss import Loss
 from evaluate import generate_coco_format_predict, generate_coco_format, evaluate
 from utils import save_batch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import RichProgressBar, ModelCheckpoint
-
-class Lion(torch.optim.Optimizer):
-    '''
-    Lion optimizer, borrow from: https://github.com/lucidrains/lion-pytorch    
-    '''
-    def __init__( self, params, lr: float = 1e-4, betas = (0.9, 0.99), weight_decay = 0.0):
-        assert lr > 0.
-        assert all([0. <= beta <= 1. for beta in betas])
-
-        defaults = dict( lr = lr, betas = betas, weight_decay = weight_decay)
-
-        super().__init__(params, defaults)
-        
-    def update_fn(self, p, grad, exp_avg, lr, wd, beta1, beta2):
-        # stepweight decay
-
-        p.data.mul_(1 - lr * wd)
-
-        # weight update
-
-        update = exp_avg.clone().mul_(beta1).add(grad, alpha = 1 - beta1).sign_()
-        p.add_(update, alpha = -lr)
-
-        # decay the momentum running average coefficient
-
-        exp_avg.mul_(beta2).add_(grad, alpha = 1 - beta2)
-
-    @torch.no_grad()
-    def step( self, closure = None):
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-        for group in self.param_groups:
-            for p in filter(lambda p: p.grad is not None, group['params']):
-
-                grad, lr, wd, beta1, beta2, state = p.grad, group['lr'], group['weight_decay'], *group['betas'], self.state[p]
-                # init state - exponential moving average of gradient values
-                if len(state) == 0:
-                    state['exp_avg'] = torch.zeros_like(p)
-
-                exp_avg = state['exp_avg']
-                self.update_fn( p, grad, exp_avg, lr, wd, beta1, beta2)
-
-        return loss
 
 class LightningModel(pl.LightningModule):
     def __init__(self, config, resizer=None):
@@ -83,13 +38,19 @@ class LightningModel(pl.LightningModule):
             optimizer = torch.optim.AdamW(self.parameters(), lr=opt_config['base_lr'],
                                          foreach=True)
         else:
-            # optimizer = Lion(self.parameters(), lr=opt_config['base_lr'])  
             optimizer = torch.optim.SGD(self.parameters(), lr=opt_config['base_lr'])
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
+        
+        scheduler = CosineAnnealingLR(optimizer,
                 T_max=self.config['epochs'], eta_min=opt_config['end_lr'])
-    
-        # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-        #             milestones=[50, 80], gamma=0.1)
+        
+        if opt_config['warmup_epochs'] > 0:
+            warmup_scheduler = LinearLR(optimizer, start_factor=0.5, total_iters=opt_config['warmup_epochs'])
+            scheduler = SequentialLR(optimizer,
+                                     schedulers=[warmup_scheduler, scheduler],
+                                     milestones=[opt_config['warmup_epochs']])
+            
+            if not hasattr(scheduler, "optimizer"):      # https://github.com/pytorch/pytorch/issues/67318
+                setattr(scheduler, "optimizer", optimizer)
         
         return {'optimizer':optimizer, 'lr_scheduler':scheduler}
     
@@ -172,7 +133,7 @@ if __name__ == '__main__':
 
     trainer = pl.Trainer(max_epochs=config['epochs'], default_root_dir=config['save_dir'], #profiler='simple',
                             accelerator="gpu", devices=config['gpu'], precision='16-mixed',
-                            callbacks=[pbar, ckpt])
+                            callbacks=[pbar, ckpt], check_val_every_n_epoch=20)
     #Resume if needed
     if config['resume'] and config['checkpoint']:
         if os.path.exists(config['checkpoint']):

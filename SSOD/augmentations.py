@@ -1,121 +1,160 @@
-import numpy as np
+from copy import deepcopy
+import math
 import albumentations as A
 import cv2
-
-ROTATE_DEGREE = [90, 180, 270]
-
-def rotate(image, boxes, prob=0.5, border_value=(128, 128, 128)):
-    random_prob = np.random.uniform()
-    if random_prob < (1 - prob):
-        return image, boxes
-    rotate_degree = ROTATE_DEGREE[np.random.randint(0, 3)]
-    h, w = image.shape[:2]
-    # Compute the rotation matrix.
-    M = cv2.getRotationMatrix2D(center=(w / 2, h / 2),
-                                angle=rotate_degree,
-                                scale=1)
-
-    # Get the sine and cosine from the rotation matrix.
-    abs_cos_angle = np.abs(M[0, 0])
-    abs_sin_angle = np.abs(M[0, 1])
-
-    # Compute the new bounding dimensions of the image.
-    new_w = int(h * abs_sin_angle + w * abs_cos_angle)
-    new_h = int(h * abs_cos_angle + w * abs_sin_angle)
-
-    # Adjust the rotation matrix to take into account the translation.
-    M[0, 2] += new_w // 2 - w // 2
-    M[1, 2] += new_h // 2 - h // 2
-
-    # Rotate the image.
-    image = cv2.warpAffine(image, M=M, dsize=(new_w, new_h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT,
-                           borderValue=border_value)
-    if boxes is None:
-        return image, None
-
-    new_boxes = []
-    for box in boxes:
-        x1, y1, x2, y2 = box
-        points = M.dot([
-            [x1, x2, x1, x2],
-            [y1, y2, y2, y1],
-            [1, 1, 1, 1],
-        ])
-
-        # Extract the min and max corners again.
-        min_xy = np.sort(points, axis=1)[:, :2]
-        min_x = np.mean(min_xy[0])
-        min_y = np.mean(min_xy[1])
-        max_xy = np.sort(points, axis=1)[:, 2:]
-        max_x = np.mean(max_xy[0])
-        max_y = np.mean(max_xy[1])
-
-        new_boxes.append([min_x, min_y, max_x, max_y])
-    boxes = np.array(new_boxes)
-    return image, boxes
-
-def flipx(image, boxes, prob=0.5):
-    random_prob = np.random.uniform()
-    if random_prob < (1 - prob):
-        return image, boxes
-    image = image[:, ::-1]
-    if boxes is None:
-        return image, None
-    h, w = image.shape[:2]
-    tmp = boxes[:, 0].copy()
-    boxes[:, 0] = w - boxes[:, 2]
-    boxes[:, 2] = w - tmp
-    return image, boxes
-
-def multi_scale(image, boxes, prob=1.):
-    random_prob = np.random.uniform()
-    if random_prob < (1 - prob):
-        return image, boxes
-    h, w = image.shape[:2]
-    scale = np.random.choice(np.arange(0.7, 1.4, 0.1))
-    nh, nw = int(round(h * scale)), int(round(w * scale))
-    image = cv2.resize(image, (nw, nh), interpolation=cv2.INTER_LINEAR)
-    if boxes is None:
-        return image, None
-    boxes = np.round(boxes * scale).astype(np.int32)
-    return image, boxes
+import numpy as np
+import os
 
 class WeakAug:
-    def __init__(self, multi_scale_prob=0.5, rotate_prob=0.05, flip_prob=0.5,
-                 border_value=(0, 0, 0)):
-        self.multi_scale_prob = multi_scale_prob
-        self.rotate_prob = rotate_prob
-        self.flip_prob = flip_prob
-        self.border_value = border_value
-
-    def __call__(self, image, boxes=None):
-
-        image, boxes = multi_scale(image, boxes, prob=self.multi_scale_prob)
-        image, boxes = rotate(image, boxes, prob=self.rotate_prob, border_value=self.border_value)
-        image, boxes = flipx(image, boxes, prob=self.flip_prob)
-        if boxes is None:
-            return image
-        return image, boxes
+    def __init__(self, config):
+        '''
+        augmentation
+        Note: use rotate in affine cause lost box, use safe rotate instead
+        '''
+        self.p = config['keep']
+                
+        affine = config['affine']
+        rotate = config['rotate']
+        
+        T = [
+            # A.BBoxSafeRandomCrop(0.0, p=config['crop']),
+            A.RandomSizedBBoxSafeCrop(640, 640, 0, p=config['crop']),
+            A.Affine(scale={'x':affine['scale_x'], 'y':affine['scale_y']},
+                    keep_ratio=affine['keep_ratio'],
+                    rotate=None, shear=affine['shear'], p=affine['prob']),
+            A.SafeRotate (limit=rotate['degree'], border_mode=cv2.BORDER_CONSTANT,
+                          value=0, p=rotate['prob']),
+            A.HorizontalFlip(p=config['hflip']),
+            A.VerticalFlip(p=config['vflip']),
+        ]
+    
+        self.transform = A.Compose(T, bbox_params=A.BboxParams(format='pascal_voc'))
+    
+    def __call__(self, data):
+        '''
+        data: a dictionari with {'image': image, 'boxes': boxes, 'class_ids':class_ids}
+        '''
+        if np.random.random() < self.p:
+            return data 
+        ## Keep self.keep_prob original image
+        boxes = [list(box) + [c] for box, c in zip(data['boxes'], data['class_ids'])]
+        
+        res = self.transform(image=data['image'], bboxes=boxes)
+        augmented_data = deepcopy(data)
+        augmented_data['image'] = res['image']
+        augmented_data['boxes'] = [box[:4] for box in res['bboxes']]
+        augmented_data['class_ids'] = [box[4] for box in res['bboxes']]
+        return augmented_data
 
 class StrongAug:
-    def __init__(self):
+    def __init__(self, config):
         '''
         Augmentation methods used: ColorJitter, Grayscale, GaussianBlur, RandomCrop
         '''
+        jitter = config['color_jitter']
+        self.p = config['keep']
         self.transform = A.Compose([
-            A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.8),
-            A.CoarseDropout (max_holes=1, max_height=50, max_width=50,
-                                        min_height=10, min_width=10, p=0.7),
-            A.CoarseDropout (max_holes=1, max_height=100, max_width=100,
-                                        min_height=30, min_width=30, p=0.5),
-            A.CoarseDropout (max_holes=1, max_height=200, max_width=200,
-                                        min_height=50, min_width=50, p=0.3),
-            A.GaussianBlur(sigma_limit=2.0, p=0.5),
-            A.ToGray(p=0.2)
+             A.ColorJitter(brightness=jitter['brightness'], contrast=jitter['contrast'],
+                          saturation=jitter['saturation'], hue=jitter['hue'], p=jitter['prob']),
+            A.CoarseDropout (max_holes=3, max_height=50, max_width=50,
+                                        min_height=10, min_width=10, p=0.2),
+            # A.CoarseDropout (max_holes=1, max_height=100, max_width=100,
+            #                             min_height=30, min_width=30, p=0.5),
+            # A.CoarseDropout (max_holes=1, max_height=200, max_width=200,
+            #                             min_height=50, min_width=50, p=0.3),
+            A.GaussianBlur(p=config['blur']),
+            # A.ImageCompression(quality_lower=75, quality_upper=100, p=config['image_compression']),
+            A.ToGray(p=config['gray'])
         ])
 
     def __call__(self, image):
+        if np.random.random() < self.p:
+            return image 
         image = self.transform(image=image)['image']
         if len(image.shape) == 2:
             image = np.stack([image, image, image], -1)
         return image
+
+class AdvancedAugmenter:
+    def __init__(self, dataset, advanced_config, target_size=(640, 640)):
+        self.p = advanced_config['keep'] #all prob
+        self.target_size= target_size
+        self.dataset = dataset #list
+    
+    def mosaic_v2(self, list_images, list_boxes):
+        w, h = self.target_size
+        scale_range = (0.3, 0.7)
+        output_img = np.zeros([w, h, 3], dtype=np.uint8)
+        scale_x = scale_range[0] + np.random.random() * (scale_range[1] - scale_range[0])
+        scale_y = scale_range[0] + np.random.random() * (scale_range[1] - scale_range[0])
+        divid_point_x = int(scale_x * w)
+        divid_point_y = int(scale_y * h)
+
+        new_anno = []
+        for i in range(4):
+            img = list_images[i]
+            im_h, im_w = img.shape[:2]
+            annos = [[xmin/im_w, ymin/im_h, xmax/im_w, ymax/im_h, c]
+                for (xmin, ymin, xmax, ymax, c) in list_boxes[i]]
+            if i == 0:  # top-left
+                img = cv2.resize(img, (divid_point_x, divid_point_y))
+                output_img[:divid_point_y, :divid_point_x, :] = img
+                new_anno += [[xmin*scale_x, ymin*scale_y,
+                             xmax*scale_x, ymax*scale_y, c]
+                for (xmin, ymin, xmax, ymax, c) in annos]
+
+            elif i == 1:  # top-right
+                img = cv2.resize(img, (w - divid_point_x, divid_point_y))
+                output_img[:divid_point_y, divid_point_x:w, :] = img
+                new_anno += [[scale_x + xmin * (1 - scale_x), ymin*scale_y,
+                             scale_x + xmax * (1 - scale_x), ymax*scale_y, c]
+                for (xmin, ymin, xmax, ymax, c) in annos]
+
+            elif i == 2:  # bottom-left
+                img = cv2.resize(img, (divid_point_x, h - divid_point_y))
+                output_img[divid_point_y:h, :divid_point_x, :] = img
+                new_anno += [[xmin*scale_x, scale_y + ymin * (1 - scale_y),
+                             xmax*scale_x, scale_y + ymax * (1 - scale_y), c]
+                for (xmin, ymin, xmax, ymax, c) in annos]
+
+            else:  # bottom-right
+                img = cv2.resize(img, (w - divid_point_x, h - divid_point_y))
+                output_img[divid_point_y:h, divid_point_x:w, :] = img
+                new_anno += [[scale_x + xmin * (1 - scale_x), scale_y + ymin * (1 - scale_y),
+                             scale_x + xmax * (1 - scale_x), scale_y + ymax * (1 - scale_y), c]
+                for (xmin, ymin, xmax, ymax, c) in annos]
+
+        #filter out anno with height or width smaller than 0.02 image size
+        new_anno = [anno for anno in new_anno if
+                    0.02 < (anno[2]-anno[0]) and 0.02 < (anno[3] - anno[1])]
+
+        new_anno = [[xmin*w, ymin*h,
+                             xmax*w, ymax*h, c]
+                for (xmin, ymin, xmax, ymax, c) in new_anno]
+
+        return output_img, new_anno
+
+    def __call__(self, item):
+        '''
+        item: a dictionari with {'image': image, 'boxes': boxes, 'class_ids':class_ids}
+        '''
+        ## Keep self.keep_prob original image
+        if np.random.random() < self.p:
+            return item
+        
+        #Sample 3 more data
+        list_data = [item]
+        samples = np.random.choice(self.dataset.data, 3)
+        for sample in samples:
+            list_data.append(self.dataset.load_item(sample))
+            
+        list_images, list_boxes = [], []
+        for data in list_data:
+            list_images.append(data['image'])
+            list_boxes.append([list(box) + [obj_name] for box, obj_name in zip(data['boxes'], data['class_ids'])])
+        new_image, new_boxes = self.mosaic_v2(list_images, list_boxes)
+        augmented_data = dict()
+        augmented_data['image'] = new_image
+        augmented_data['boxes'] = [box[:4] for box in new_boxes]
+        augmented_data['class_ids'] = [box[4] for box in new_boxes]
+        return augmented_data

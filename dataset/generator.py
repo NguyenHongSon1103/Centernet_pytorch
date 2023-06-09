@@ -117,6 +117,12 @@ class Generator(Dataset):
         os.makedirs(self.save_dir, exist_ok=True)
 
         self.data = load_data(self.img_dirs, self.mode)
+        # np.random.seed(12345)
+        self.on_epoch_end()
+        # if mode == 'train':
+        #     split_idx = int(len(self.data) * 0.10) #1%, 5%, 10%
+        #     self.data = self.data[:split_idx]
+            
         self.assigner = Assigner(self.num_classes, self.input_size, self.stride, self.max_objects)
 
         ## New aumgenter
@@ -146,24 +152,26 @@ class Generator(Dataset):
         item = self.load_item(d)
         ##Augmentation
         if self.mode == 'train':
-            # s = time()
-            src_item = deepcopy(item)
-            # if self.advanced_augmenter is not None:
-            src_item = self.advanced_augmenter(src_item)
-            src_item = self.augmenter(src_item) 
-            #bug: Lost box after spatial transform, happen a few time
-            #still not know which transformation caused this
-            if len(src_item['boxes']) > 0:
-                item = src_item
-            # print('augment time: ', time()-s)
+            try:
+                src_item = deepcopy(item)
+                # if self.advanced_augmenter is not None:
+                src_item = self.advanced_augmenter(src_item)
+                src_item = self.augmenter(src_item) 
+                #bug: Lost box after spatial transform, happen a few time
+                #still not know which transformation caused this
+                if len(src_item['boxes']) > 0:
+                    item = src_item
+            except:
+                pass
                 
         h, w = item['image'].shape[:2]
         item['image'] = cv2.cvtColor(item['image'], cv2.COLOR_BGR2RGB)
         item['image'] = self.resizer.resize_image(item['image'])
         item['boxes'] = self.resizer.resize_boxes(item['boxes'], (h, w)) #640x640
-
-        item['image'] = item['image'].astype('float32') / 255.0
         
+        # item['image'] = item['image'].astype('float32') - [122.67891434, 116.66876762, 104.00698793]
+        item['image'] = item['image'].astype('float32') / 255.0
+    
         hm, wh, reg, indices = self.assigner(item['boxes'], item['class_ids'])
 
         return item['image'], (hm, wh, reg, indices), d['im_path']

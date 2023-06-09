@@ -192,7 +192,6 @@ if __name__ == '__main__':
     import yaml
     from dataset.generator import Generator
     from model import Model
-    # from model_2 import Model
 
     parser = ArgumentParser()
     parser.add_argument('--config', default='config/default.yaml')

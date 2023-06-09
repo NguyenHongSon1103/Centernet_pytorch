@@ -279,5 +279,36 @@ def save_batch(impaths, images, targets, blend_heatmap=True, size=640, save_dir=
             image[sc:ec, sr:er] = drews[i*3+j]
     cv2.imwrite(os.path.join(save_dir, 'preprocessed', name), cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 
+def save_batch_pred(images, preds, size=640, save_dir='', name=''):
+    drews = []
+    for i, (src_img, pred) in enumerate(zip(images[:9], preds)):
+        img = src_img.copy()
+        #convert img from float to uint8
+        img = (img*255.0).astype('uint8')
+        # Convert target from label to boxes
+        boxes, scores, class_ids = pred[..., :4], pred[..., 4], pred[..., 5].astype('int32')
+        boxes = np.array(boxes)*4 #160 to 640
+        idxs = np.argsort(scores)[-5:]
+        boxes, scores, class_ids = boxes[idxs], scores[idxs], class_ids[idxs]
+
+        for box, s, cls_id in zip(boxes, scores, class_ids):
+            x1, y1, x2, y2 = [int(p) for p in box]
+            img = cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 1)
+            # ret, baseline = cv2.getTextSize(str(cls_id), cv2.FONT_HERSHEY_SIMPLEX, 1, 1)
+            # img = cv2.rectangle(img, (x1, y1- ret[1] - baseline), (x1 + ret[0], y1), (255, 255, 255), -1)
+            img = cv2.putText(img, '%.3f'%s, (x1-10, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1)
+        
+        drews.append(img)
+
+    #merge each 9 images: 
+    image = np.zeros((size*3, size*3, 3), dtype='uint8')
+
+    for i in range(3):
+        for j in range(3):
+            if i*3+j > len(drews): break
+            sc, ec, sr, er = i*size, (i+1)*size, j*size, (j+1)*size 
+
+            image[sc:ec, sr:er] = drews[i*3+j]
+    cv2.imwrite(os.path.join(save_dir, 'preprocessed', name), cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 if __name__ == '__main__':
     gaussian2D((3, 3))

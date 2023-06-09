@@ -7,7 +7,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from modules import _transpose_and_gather_feat
+from modules import _transpose_and_gather_feat, Decoder, _topk, _nms
 import math
 
 def _neg_loss(pred, gt):
@@ -164,72 +164,18 @@ class BboxLoss(nn.Module):
         loss_iou = ((1.0 - iou)).sum() / (mask.sum() + 1e-4)
 
         return loss_iou
-
-def balanced_l1_loss(pred,
-                     target,
-                     beta=1.0,
-                     alpha=0.5,
-                     gamma=1.5):
-    """Calculate balanced L1 loss.
-
-    Please see the `Libra R-CNN <https://arxiv.org/pdf/1904.02701.pdf>`_
-
-    Args:
-        pred (torch.Tensor): The prediction with shape (N, 4).
-        target (torch.Tensor): The learning target of the prediction with
-            shape (N, 4).
-        beta (float): The loss is a piecewise function of prediction and target
-            and ``beta`` serves as a threshold for the difference between the
-            prediction and target. Defaults to 1.0.
-        alpha (float): The denominator ``alpha`` in the balanced L1 loss.
-            Defaults to 0.5.
-        gamma (float): The ``gamma`` in the balanced L1 loss.
-            Defaults to 1.5.
-
-    Returns:
-        torch.Tensor: The calculated loss
-    """
-    assert beta > 0
-    if target.numel() == 0:
-        return pred.sum() * 0
-
-    assert pred.size() == target.size()
-
-    diff = torch.abs(pred - target)
-    b = math.e**(gamma / alpha) - 1
-    loss = torch.where(
-        diff < beta, alpha / b *
-        (b * diff + 1) * torch.log(b * diff / beta + 1) - alpha * diff,
-        gamma * diff + gamma / b - alpha * beta)
-
-    return loss
-
-class BalancedL1Loss(nn.Module):
-    def __init__(self, alpha=0.5, beta=1.0, gamma=1.5):
-        super().__init__()
-        self.alpha = alpha
-        self.beta = beta
-        self.gamma = gamma
-    
-    def forward(self, output, mask, ind, target):
-        pred = _transpose_and_gather_feat(output, ind)
-        mask = mask.unsqueeze(2).expand_as(pred).float()
-        loss = balanced_l1_loss(pred*mask, target*mask, 
-                                self.beta, self.alpha, self.gamma)
-        loss = loss.sum() / (mask.sum() + 1e-4)
-        return loss
     
 class Loss(nn.Module):
     def __init__(self, weights=[1.0, 0.1, 1.0]) -> None:
         super().__init__()
         self.hm_loss = FocalLoss()
-        # self.wh_loss = RegL1Loss()
+        # self.iou_loss = BboxLoss()
         self.wh_loss = RegLoss()
         self.reg_loss = RegLoss()
         self.loss_keys = ['hm_loss', 'wh_loss', 'reg_loss', 'total_loss']
         self.weights = weights
     
-    def forward(self, output, target, ):
+    def forward(self, output, target):
         '''
         output: 
                 hm: NxCxWxH | wh: Nx2xWxH | reg: Nx2xWxH
@@ -238,16 +184,84 @@ class Loss(nn.Module):
         '''
         # for ts in target:
         #     print(ts.shape)
-
-        indices = target[3].type(torch.int64)
-        mask = target[3] > 0
+        
+        with torch.no_grad():
+            indices = target[3].type(torch.int64)
+            mask = target[3] > 0
         hm_loss = self.hm_loss(output[0], target[0].permute(0, 3, 1, 2)) * self.weights[0]
         wh_loss = self.wh_loss(output[1], mask, indices, target[1])*self.weights[1]
-        # wh_loss = self.wh_loss(output[0].shape[2], output[1], mask, indices, target[1]) #for ciou loss
+        # iou_loss = self.iou_loss(output[1].shape[2], output[1], mask, indices, target[1]) #for ciou loss
+        # wh_loss = wh_loss + iou_loss
         
         reg_loss = self.reg_loss(output[2], mask, indices, target[2])*self.weights[2]
 
         total_loss = hm_loss + wh_loss + reg_loss
         loss_dict = {key:value for key, value in zip(self.loss_keys, [hm_loss, wh_loss, reg_loss, total_loss])}
+       
+        return total_loss, loss_dict
+    
+class L1Loss(nn.Module):
+    def __init__(self):
+        super(L1Loss, self).__init__()
+    
+    def forward(self, output, target, mask = None):
+        loss = F.l1_loss(output * mask, target * mask, reduction='sum')
+        loss = loss / (mask.sum() + 1e-4)
+        return loss
+
+class MSELoss(nn.Module):
+    def __init__(self):
+        super(MSELoss, self).__init__()
+    
+    def forward(self, output, target):
+        loss = F.mse_loss(output, target, reduction='mean')
+        # loss = loss / (target.sum() + 1e-4)
+        return loss
+    
+class UnsupLoss(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        # self.hm_loss = FocalLoss()
+        self.hm_loss = MSELoss()
+        self.wh_loss = L1Loss()
+        self.reg_loss = L1Loss()
+        self.loss_keys = ['unsup_hm_loss', 'unsup_wh_loss', 'unsup_reg_loss', 'unsup_total_loss']
+    
+    def forward(self, output_s, output_t, current_epoch):
+        '''
+        output: 
+                hm_s: NxCxWxH | wh_s: Nx2xWxH | reg_s: Nx2xWxH
+        target: 
+                hm_t: NxCxWxH | wh_t: Nx2xWxH | reg_t: Nx2xWxH
+        '''
+        ## Get topk index
+        # with torch.no_grad():
+        #     heat = _nms(output_t[0])
+        #     #Get 10 peak, slowly increase threshold
+        #     sorted_vals, sorted_inds = torch.topk(heat.view(-1), 10)
+        #     topk_val = max(0.05 + (0.2-0.05)*current_epoch/100, float(sorted_vals[-1]))
+        #     heat = torch.where(heat >  topk_val, torch.ones_like(heat), heat)
+        
+        with torch.no_grad():
+            # heat = _nms(output_t[0]) # NxCxHxW
+            heat = output_t[0]
+            for i in range(heat.shape[0]):
+                #Get 5 peak, slowly increase threshold
+                sorted_vals, sorted_inds = torch.topk(heat[i].view(-1), 5)
+                # print(sorted_vals)
+                # Keep atleast 1 peak to pseudo target
+                topk_val = min(sorted_vals[0], max(0.05 + (0.3-0.1)*current_epoch/100, float(sorted_vals[-1])))
+                heat[i] = torch.where(heat[i] >=  topk_val, torch.ones_like(heat[i]), heat[i])
+            mask = heat.max(1, keepdim=True)[0]
+            
+        hm_loss = self.hm_loss(output_s[0], heat) 
+        wh_loss = self.wh_loss(output_s[1], output_t[1], mask)*0.1 
+        reg_loss = self.reg_loss(output_s[2], output_t[2], mask)
+        
+        total_loss = hm_loss + wh_loss + reg_loss
+        loss_dict = {key:value for key, value in zip(self.loss_keys, [hm_loss, wh_loss, reg_loss, total_loss])}
+        
+        # total_loss = hm_loss
+        # loss_dict = {'unsup_hm_loss':hm_loss, 'unsup_total_loss':total_loss}
        
         return total_loss, loss_dict
