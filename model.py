@@ -142,9 +142,6 @@ class Neck(nn.Module):
         self.in3 = Conv(in_channels[0], c, k=1) #for layer15
 
         self.concat_attention = ScaleFeatureSelection(inner_channels, c, 3, attention_type='scale_channel_spatial')
-        
-        # self.ia = ImplicitA(c*3)
-        # self.ims = nn.ModuleList([ImplicitM(c) for i in range(3)])
 
     def forward(self, features):
         out15, out18, out21 = features
@@ -152,11 +149,8 @@ class Neck(nn.Module):
         up2 = self.in2(self.up2(out18))
         up3 = self.in3(self.up3(out15))
         
-        # fuse = torch.cat((self.ims[0](up1), self.ims[1](up2), self.ims[2](up3)), 1)
         fuse = torch.cat((up3, up2, up1), 1)
         fuse = self.concat_attention(fuse, [up3, up2, up1])
-        # fuse = self.ims[0](up1) + self.ims[1](up2) + self.ims[2](up3)
-        # fuse = self.ia(fuse)
         return fuse
 
 class IHead(nn.Module):

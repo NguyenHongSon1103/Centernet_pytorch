@@ -250,8 +250,12 @@ class UnsupLoss(nn.Module):
                 sorted_vals, sorted_inds = torch.topk(heat[i].view(-1), 5)
                 # print(sorted_vals)
                 # Keep atleast 1 peak to pseudo target
-                topk_val = min(sorted_vals[0], max(0.05 + (0.3-0.1)*current_epoch/100, float(sorted_vals[-1])))
-                heat[i] = torch.where(heat[i] >=  topk_val, torch.ones_like(heat[i]), heat[i])
+                # topk_val = min(sorted_vals[0], max(0.2 + 0.8*current_epoch/100, float(sorted_vals[-1])))
+                # heat[i] = torch.where(heat[i] >=  topk_val, torch.ones_like(heat[i]), heat[i])
+                
+                #Thử nghiệm với ngưỡng cố định: 0.1, 0.2, 0.3, 0.4, 0.5
+                heat[i] = torch.where(heat[i] >=  0.4, torch.ones_like(heat[i]), heat[i])
+                
             mask = heat.max(1, keepdim=True)[0]
             
         hm_loss = self.hm_loss(output_s[0], heat) 

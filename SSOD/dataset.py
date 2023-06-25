@@ -118,7 +118,7 @@ class Generator(Dataset):
         self.data = load_data(hparams[mode], self.mode)
             
         if self.mode == 'train':
-            np.random.seed(12345)
+            # np.random.seed(12345)
             np.random.shuffle(self.data)
             split_idx = int(len(self.data) * float(hparams['partial'])) #1%, 5%, 10%
             self.unsup_data = self.data[split_idx:]

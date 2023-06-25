@@ -11,23 +11,24 @@ def test_model():
     '''
     n -> 3.0M, s-> 11.8M, m-> 28.4M
     '''
-    backbone = Model('n', nc=2)
-    device = torch.device(1)
+    backbone = Model('n', nc=2, is_training=False)
+    device = torch.device(0)
     backbone.to(device)
+    backbone.fuse()
     # backbone = Backbone('n')
     # torchinfo.summary(backbone, input_size=(1, 3, 640, 640), depth=1)
     total = sum(dict((p.data_ptr(), p.numel()) for p in backbone.parameters()).values())
     print(total)
     with torch.no_grad():
-        data = np.random.random((16, 3, 640, 640)).astype('float32')
+        data = np.random.random((1, 3, 640, 640)).astype('float32')
         data = torch.from_numpy(data).to(device)
         res = backbone(data)
-        print(res[0].shape, res[1].shape, res[2].shape)
+        # print(res[0].shape, res[1].shape, res[2].shape)
 
     mean_time = 0
     for i in range(10):
         with torch.no_grad():
-            data = np.random.random((16, 3, 640, 640)).astype('float32')
+            data = np.random.random((1, 3, 640, 640)).astype('float32')
             data = torch.from_numpy(data).to(device)
 
             s = time()
@@ -37,6 +38,7 @@ def test_model():
             print("Forward time: ", t - s)
     
     print("Mean forward time: ", mean_time/10)
+    print('Average FPS: ', (10/mean_time))
 
 def totensor(arr):
     return torch.from_numpy(arr)
@@ -173,7 +175,7 @@ def test_semi_generator():
     print("Avg time per batch: ", mean_time/20)
 
 if __name__ == '__main__':
-    test_semi_generator()
+    # test_semi_generator()
     # test_generator()
-    # test_model() 
+    test_model() 
     # test_loss()

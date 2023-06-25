@@ -82,15 +82,15 @@ class LightningModel(pl.LightningModule):
         unsup_strong_images = torch.cat(unsup_strong_images, 0)
 
         # Supervised training 
-        images = images.permute(0, 3, 1, 2) #transpose image to 3xHxC
+        images = images.permute(0, 3, 1, 2).contiguous() #transpose image to 3xHxC
         output = self.model(images)
         
         sup_loss, loss_dict = self.suploss_fn(output, targets)
        
         # Start unsupervised training from epoch 20
         if self.current_epoch > self.start_semi_epoch:
-            unsup_weak_images = unsup_weak_images.permute(0, 3, 1, 2)
-            unsup_strong_images = unsup_strong_images.permute(0, 3, 1, 2)
+            unsup_weak_images = unsup_weak_images.permute(0, 3, 1, 2).contiguous()
+            unsup_strong_images = unsup_strong_images.permute(0, 3, 1, 2).contiguous()
             student_output = self.model(unsup_strong_images)
             with torch.no_grad():
                 teacher_output = self.model_teacher.model(unsup_weak_images)
@@ -117,7 +117,7 @@ class LightningModel(pl.LightningModule):
                 preds = self.model_teacher.model.decoder(teacher_output).cpu().numpy() #Nx10x6
                 # print(teacher_output[1][0][:, :10, :10])
                 # assert False
-                save_batch_pred(unsup_weak_images.permute(0, 2, 3, 1).cpu().numpy(), 
+                save_batch_pred(unsup_weak_images.permute(0, 2, 3, 1).contiguous().cpu().numpy(), 
                                 preds, size=640, save_dir=self.config['save_dir'],
                                 name=str(batch_idx)+'_%d.jpg'%self.current_epoch)
                 
@@ -131,7 +131,7 @@ class LightningModel(pl.LightningModule):
             self.model_teacher.update(self.model)
                     
         for key in loss_dict:
-            self.log(key, loss_dict[key].item(), prog_bar=True, on_step=False, on_epoch=True)
+            self.log(key, loss_dict[key].item(), prog_bar=True, on_step=False, on_epoch=True, sync_dist =True)
         
         if self.current_epoch > self.start_semi_epoch:
             return sup_loss + 0.1*unsup_loss 
@@ -141,7 +141,7 @@ class LightningModel(pl.LightningModule):
     def validation_step(self, val_batch, batch_idx):
         # pass
         images, impaths = val_batch
-        images = images.permute(0, 3, 1, 2) #transpose image to 3xHxC
+        images = images.permute(0, 3, 1, 2).contiguous() #transpose image to 3xHxC
         
         with torch.no_grad():
             out = self.model(images)
@@ -155,17 +155,18 @@ class LightningModel(pl.LightningModule):
             self.validation_step_outputs.append({'im_path':im_path, 'boxes':boxes, 'scores':scores, 'class_ids':class_ids})
     
     def on_validation_epoch_end(self):
-        total_output = np.stack(self.validation_step_outputs)
-        pred_path = os.path.join(self.config['save_dir'], 'val_predictions.json')
-        label_path = os.path.join(config['save_dir'], 'val_labels.json')
-        generate_coco_format_predict(total_output, pred_path)
-        stats = evaluate(label_path, pred_path)
-        val_metrics = {'mAP50':stats[1], 'mAP50-95':stats[0]}
-        print('mAP@50    : %8.3f'%stats[1])
-        print('mAP@50:95 : %8.3f'%stats[0])
-        # val_metrics = {'mAP50':0, 'mAP50-95':0}
-        self.log_dict(val_metrics, prog_bar=False, on_step=False, on_epoch=True)
-        self.validation_step_outputs.clear()
+        if self.global_rank == 0:
+            total_output = np.stack(self.validation_step_outputs)
+            pred_path = os.path.join(self.config['save_dir'], 'val_predictions.json')
+            label_path = os.path.join(config['save_dir'], 'val_labels.json')
+            generate_coco_format_predict(total_output, pred_path)
+            stats = evaluate(label_path, pred_path)
+            val_metrics = {'mAP50':stats[1], 'mAP50-95':stats[0]}
+            print('mAP@50    : %8.3f'%stats[1])
+            print('mAP@50:95 : %8.3f'%stats[0])
+            # val_metrics = {'mAP50':0, 'mAP50-95':0}
+            self.log_dict(val_metrics, prog_bar=False, on_step=False, on_epoch=True, sync_dist =True)
+            self.validation_step_outputs.clear()
         
 parser = ArgumentParser()
 parser.add_argument('--config', default='config/default.yaml')
@@ -184,8 +185,8 @@ os.makedirs(os.path.join(config['save_dir'], 'preprocessed'), exist_ok=True)
 train_dataset = Generator(config, mode='train')
 val_dataset   = Generator(config, mode='val')
 train_loader  = DataLoader(train_dataset, shuffle=True, batch_size=config['batch_size'],
-                           num_workers=8, pin_memory=True)
-val_loader    = DataLoader(val_dataset, shuffle=False, batch_size=config['batch_size'], num_workers=8)
+                           num_workers=4, pin_memory=True)
+val_loader    = DataLoader(val_dataset, shuffle=False, batch_size=config['batch_size'], num_workers=4)
 
 generate_coco_format(val_dataset, os.path.join(config['save_dir'], 'val_labels.json'))
 
